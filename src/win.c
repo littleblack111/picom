@@ -2859,6 +2859,7 @@ void win_update_monitor(struct x_monitors *monitors, struct managed_win *mw) {
 void map_win_start(session_t *ps, struct managed_win *w) {
 	assert(ps->server_grabbed);
 	assert(w);
+	w->dwm_mask = 0;
 
 	// Don't care about window mapping if it's an InputOnly window
 	// Also, try avoiding mapping a window twice
