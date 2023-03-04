@@ -30,6 +30,7 @@
 #include "types.h"
 #include "uthash_extra.h"
 #include "utils.h"
+#include "win_defs.h"
 #include "x.h"
 
 #ifdef CONFIG_DBUS
@@ -183,6 +184,14 @@ static inline void group_on_factor_change(session_t *ps, xcb_window_t leader) {
 			win_on_factor_change(ps, mw);
 		}
 	}
+}
+
+static inline bool is_transient(session_t *ps, const struct managed_win *w) {
+	return
+		(w->window_type < WINTYPE_NORMAL || w->window_type > WINTYPE_NORMAL)
+		||
+		((w->window_type != WINTYPE_TOOLTIP)
+		 && wid_has_prop(ps, w->client_win, ps->atoms->aWM_TRANSIENT_FOR));
 }
 
 static inline const char *win_get_name_if_managed(const struct win *w) {
@@ -512,33 +521,25 @@ static void init_animation(session_t *ps, struct managed_win *w) {
 	anim_x = &w->animation_center_x, anim_y = &w->animation_center_y;
 	anim_w = &w->animation_w, anim_h = &w->animation_h;
 
-        if (w->dwm_mask & ANIM_PREV_TAG) {
-		animation = ps->o.animation_for_prev_tag;
+	if (is_transient(ps, w)) {
+		animation = ps->o.animation_for_transient_window;
+	} else {
+		if (w->dwm_mask & ANIM_NEXT_TAG) {
+			animation = ps->o.animation_for_next_tag;
+			w->animation_is_tag |= animation >= OPEN_WINDOW_ANIMATION_ZOOM ? ANIM_FAST : ANIM_SLOW;
+			if (ps->o.enable_fading_next_tag) {
+				w->opacity = 0.0;
+				w->state = WSTATE_FADING;
+			}
+		} else if (w->dwm_mask & ANIM_UNMAP) {
+			animation = ps->o.animation_for_unmap_window;
+		}
+	}
 
-		if (ps->o.enable_fading_prev_tag) {
-		w->opacity_target_old = fmax(w->opacity_target, w->opacity_target_old);
-		w->state = WSTATE_FADING;
-		w->animation_is_tag |= ANIM_FADE;
-		}
-		if (ps->o.animation_for_prev_tag >= OPEN_WINDOW_ANIMATION_ZOOM) {
-		w->animation_is_tag |= ANIM_FAST;
-		w->dwm_mask |= ANIM_SPECIAL_MINIMIZE;
-		goto revert;
-		}
-		w->animation_is_tag |= ANIM_SLOW;
-        } else if (w->dwm_mask & ANIM_NEXT_TAG) {
-		animation = ps->o.animation_for_next_tag;
-		w->animation_is_tag |= animation >= OPEN_WINDOW_ANIMATION_ZOOM ? ANIM_FAST : ANIM_SLOW;
-		if (ps->o.enable_fading_next_tag) {
-		w->opacity = 0.0;
-		w->state = WSTATE_FADING;
-		}
-        } else if (w->dwm_mask & ANIM_UNMAP) {
-		animation = ps->o.animation_for_unmap_window;
-		revert:
+	if (w->dwm_mask & ANIM_UNMAP) {
 		anim_x = &w->animation_dest_center_x, anim_y = &w->animation_dest_center_y;
 		anim_w = &w->animation_dest_w, anim_h = &w->animation_dest_h;
-        }
+	}
 
 	double angle;
 	switch (animation) {
@@ -585,14 +586,14 @@ static void init_animation(session_t *ps, struct managed_win *w) {
 		*anim_h = w->pending_g.height;
 		break;
 	case OPEN_WINDOW_ANIMATION_SLIDE_IN:
-		*anim_x = w->pending_g.x + w->pending_g.width * 0.5;
-		*anim_y = w->pending_g.y + w->pending_g.height * 0.5;
-		*anim_w = w->pending_g.width;
-		*anim_h = w->pending_g.height;
+		w->animation_center_x = w->pending_g.x + w->pending_g.width * 0.5;
+		w->animation_w = w->pending_g.width;
+		w->animation_h = w->pending_g.height;
+		*anim_y = w->pending_g.y;
 		break;
 	case OPEN_WINDOW_ANIMATION_SLIDE_IN_CENTER:
 		*anim_x = randr_mon_center_x;
-		*anim_y = w->g.y + w->pending_g.height * 0.5;
+		*anim_y = w->g.y - (w->pending_g.height*0.4);
 		*anim_w = w->pending_g.width;
 		*anim_h = w->pending_g.height;
 		break;
@@ -700,6 +701,10 @@ void win_process_update_flags(session_t *ps, struct managed_win *w) {
 				w->dwm_mask = ANIM_PREV_TAG;
 			else if (w->pending_g.y > 0 && w->g.y < 0 && abs(w->pending_g.y - w->g.y) >= w->pending_g.height)
 				w->dwm_mask = ANIM_NEXT_TAG;
+			win_update_bounding_shape(ps, w);
+			if (!was_visible && w->g.x == w->pending_g.x && w->g.y == w->pending_g.y && w->g.width == w->pending_g.width && w->g.height == w->pending_g.height) {
+				w->dwm_mask |= ANIM_NEXT_TAG;
+			}
 
 			if (!was_visible || w->dwm_mask) {
 
@@ -2713,6 +2718,7 @@ bool destroy_win_start(session_t *ps, struct win *w) {
 }
 
 void unmap_win_start(session_t *ps, struct managed_win *w) {
+	w->dwm_mask |= ANIM_UNMAP;
 	assert(w);
 	assert(w->base.managed);
 	assert(w->a._class != XCB_WINDOW_CLASS_INPUT_ONLY);
