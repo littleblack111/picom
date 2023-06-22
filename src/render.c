@@ -583,8 +583,6 @@ void paint_one(session_t *ps, struct managed_win *w, const region_t *reg_paint) 
 	}
 }
 
-extern const char *background_props_str[];
-
 static bool get_root_tile(session_t *ps) {
 	/*
 	if (ps->o.paint_on_overlay) {
@@ -969,7 +967,7 @@ win_blur_background(session_t *ps, struct managed_win *w, xcb_render_picture_t t
 /// paint all windows
 /// region = ??
 /// region_real = the damage region
-void paint_all(session_t *ps, struct managed_win *t, bool ignore_damage) {
+void paint_all(session_t *ps, struct managed_win *t) {
 	if (ps->o.xrender_sync_fence || (ps->drivers & DRIVER_NVIDIA)) {
 		if (ps->xsync_exists && !x_fence_sync(ps->c, ps->sync_fence)) {
 			log_error("x_fence_sync failed, xrender-sync-fence will be "
@@ -984,7 +982,7 @@ void paint_all(session_t *ps, struct managed_win *t, bool ignore_damage) {
 	region_t region;
 	pixman_region32_init(&region);
 	int buffer_age = get_buffer_age(ps);
-	if (buffer_age == -1 || buffer_age > ps->ndamage || ignore_damage) {
+	if (buffer_age == -1 || buffer_age > ps->ndamage) {
 		pixman_region32_copy(&region, &ps->screen_reg);
 	} else {
 		for (int i = 0; i < get_buffer_age(ps); i++) {

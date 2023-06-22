@@ -42,8 +42,32 @@ static PFNEGLDESTROYIMAGEKHRPROC eglDestroyImageProc = NULL;
 static PFNEGLGETPLATFORMDISPLAYPROC eglGetPlatformDisplayProc = NULL;
 static PFNEGLCREATEPLATFORMWINDOWSURFACEPROC eglCreatePlatformWindowSurfaceProc = NULL;
 
+const char *eglGetErrorString(EGLint error) {
+#define CASE_STR(value)                                                                  \
+	case value: return #value;
+	switch (error) {
+		CASE_STR(EGL_SUCCESS)
+		CASE_STR(EGL_NOT_INITIALIZED)
+		CASE_STR(EGL_BAD_ACCESS)
+		CASE_STR(EGL_BAD_ALLOC)
+		CASE_STR(EGL_BAD_ATTRIBUTE)
+		CASE_STR(EGL_BAD_CONTEXT)
+		CASE_STR(EGL_BAD_CONFIG)
+		CASE_STR(EGL_BAD_CURRENT_SURFACE)
+		CASE_STR(EGL_BAD_DISPLAY)
+		CASE_STR(EGL_BAD_SURFACE)
+		CASE_STR(EGL_BAD_MATCH)
+		CASE_STR(EGL_BAD_PARAMETER)
+		CASE_STR(EGL_BAD_NATIVE_PIXMAP)
+		CASE_STR(EGL_BAD_NATIVE_WINDOW)
+		CASE_STR(EGL_CONTEXT_LOST)
+	default: return "Unknown";
+	}
+#undef CASE_STR
+}
+
 /**
- * Free a glx_texture_t.
+ * Free a gl_texture_t.
  */
 static void egl_release_image(backend_t *base, struct gl_texture *tex) {
 	struct egl_data *gd = (void *)base;
@@ -64,14 +88,14 @@ static void egl_release_image(backend_t *base, struct gl_texture *tex) {
 }
 
 /**
- * Destroy GLX related resources.
+ * Destroy EGL related resources.
  */
 void egl_deinit(backend_t *base) {
 	struct egl_data *gd = (void *)base;
 
 	gl_deinit(&gd->gl);
 
-	// Destroy GLX context
+	// Destroy EGL context
 	if (gd->ctx != EGL_NO_CONTEXT) {
 		eglMakeCurrent(gd->display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
 		eglDestroyContext(gd->display, gd->ctx);
@@ -201,12 +225,12 @@ static backend_t *egl_init(session_t *ps) {
 
 	gd->ctx = eglCreateContext(gd->display, config, NULL, NULL);
 	if (gd->ctx == EGL_NO_CONTEXT) {
-		log_error("Failed to get GLX context.");
+		log_error("Failed to get EGL context.");
 		goto end;
 	}
 
 	if (!eglMakeCurrent(gd->display, gd->target_win, gd->target_win, gd->ctx)) {
-		log_error("Failed to attach GLX context.");
+		log_error("Failed to attach EGL context.");
 		goto end;
 	}
 
@@ -283,7 +307,8 @@ egl_bind_pixmap(backend_t *base, xcb_pixmap_t pixmap, struct xvisual_info fmt, b
 	eglpixmap->owned = owned;
 
 	if (eglpixmap->image == EGL_NO_IMAGE) {
-		log_error("Failed to create eglpixmap for pixmap %#010x", pixmap);
+		log_error("Failed to create eglpixmap for pixmap %#010x: %s", pixmap,
+		          eglGetErrorString(eglGetError()));
 		goto err;
 	}
 
@@ -320,9 +345,6 @@ static void egl_present(backend_t *base, const region_t *region attr_unused) {
 	struct egl_data *gd = (void *)base;
 	gl_present(base, region);
 	eglSwapBuffers(gd->display, gd->target_win);
-	if (!gd->gl.is_nvidia) {
-		glFinish();
-	}
 }
 
 static int egl_buffer_age(backend_t *base) {
@@ -372,6 +394,7 @@ struct backend_operations egl_ops = {
     .deinit = egl_deinit,
     .bind_pixmap = egl_bind_pixmap,
     .release_image = gl_release_image,
+    .prepare = gl_prepare,
     .compose = gl_compose,
     .image_op = gl_image_op,
     .set_image_property = gl_set_image_property,
@@ -380,6 +403,7 @@ struct backend_operations egl_ops = {
     .is_image_transparent = default_is_image_transparent,
     .present = egl_present,
     .buffer_age = egl_buffer_age,
+    .last_render_time = gl_last_render_time,
     .create_shadow_context = gl_create_shadow_context,
     .destroy_shadow_context = gl_destroy_shadow_context,
     .render_shadow = backend_render_shadow_from_mask,
@@ -399,7 +423,7 @@ struct backend_operations egl_ops = {
 
 PFNEGLGETDISPLAYDRIVERNAMEPROC eglGetDisplayDriverName;
 /**
- * Check if a GLX extension exists.
+ * Check if a EGL extension exists.
  */
 static inline bool egl_has_extension(EGLDisplay dpy, const char *ext) {
 	const char *egl_exts = eglQueryString(dpy, EGL_EXTENSIONS);

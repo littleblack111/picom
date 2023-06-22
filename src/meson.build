@@ -9,7 +9,7 @@ base_deps = [
 
 srcs = [ files('picom.c', 'win.c', 'c2.c', 'x.c', 'config.c', 'vsync.c', 'utils.c',
                'diagnostic.c', 'string_utils.c', 'render.c', 'kernel.c', 'log.c',
-               'options.c', 'event.c', 'cache.c', 'atom.c', 'file_watch.c') ]
+               'options.c', 'event.c', 'cache.c', 'atom.c', 'file_watch.c', 'statistics.c') ]
 picom_inc = include_directories('.')
 
 cflags = []
@@ -20,7 +20,7 @@ required_xcb_packages = [
 ]
 
 required_packages = [
-	'x11', 'x11-xcb', 'xcb-renderutil', 'xcb-image', 'xext', 'pixman-1'
+	'x11', 'x11-xcb', 'xcb-renderutil', 'xcb-image', 'xext', 'pixman-1', 'xcb-util'
 ]
 
 foreach i : required_packages
