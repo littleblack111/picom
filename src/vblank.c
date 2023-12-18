@@ -18,11 +18,19 @@ struct vblank_callback {
 	void *user_data;
 };
 
+#define VBLANK_WIND_DOWN 4
+
 struct vblank_scheduler {
 	enum vblank_scheduler_type type;
 	xcb_window_t target_window;
 	struct x_connection *c;
 	size_t callback_capacity, callback_count;
+	/// Request extra vblank events even when no callbacks are scheduled.
+	/// This is because when callbacks are scheduled too close to a vblank,
+	/// we might send PresentNotifyMsc request too late and miss the vblank event.
+	/// So we request extra vblank events right after the last vblank event
+	/// to make sure this doesn't happen.
+	unsigned int wind_down;
 	struct vblank_callback *callbacks;
 	struct ev_loop *loop;
 };
@@ -62,6 +70,11 @@ vblank_scheduler_invoke_callbacks(struct vblank_scheduler *self, struct vblank_e
 	// callbacks might be added during callback invocation, so we need to
 	// copy the callback_count.
 	size_t count = self->callback_count;
+	if (count == 0) {
+		self->wind_down--;
+	} else {
+		self->wind_down = VBLANK_WIND_DOWN;
+	}
 	for (size_t i = 0; i < count; i++) {
 		self->callbacks[i].fn(event, self->callbacks[i].user_data);
 	}
@@ -69,7 +82,7 @@ vblank_scheduler_invoke_callbacks(struct vblank_scheduler *self, struct vblank_e
 	memmove(self->callbacks, self->callbacks + count,
 	        (self->callback_count - count) * sizeof(*self->callbacks));
 	self->callback_count -= count;
-	if (self->callback_count) {
+	if (self->callback_count || self->wind_down) {
 		vblank_scheduler_schedule_internal(self);
 	}
 }
@@ -130,7 +143,7 @@ struct vblank_scheduler *vblank_scheduler_new(struct ev_loop *loop, struct x_con
 
 bool vblank_scheduler_schedule(struct vblank_scheduler *self,
                                vblank_callback_t vblank_callback, void *user_data) {
-	if (self->callback_count == 0) {
+	if (self->callback_count == 0 && self->wind_down == 0) {
 		vblank_scheduler_schedule_internal(self);
 	}
 	if (self->callback_count == self->callback_capacity) {
