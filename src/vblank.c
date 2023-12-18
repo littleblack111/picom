@@ -21,18 +21,19 @@ struct vblank_callback {
 #define VBLANK_WIND_DOWN 4
 
 struct vblank_scheduler {
-	enum vblank_scheduler_type type;
-	xcb_window_t target_window;
 	struct x_connection *c;
 	size_t callback_capacity, callback_count;
+	struct vblank_callback *callbacks;
+	struct ev_loop *loop;
 	/// Request extra vblank events even when no callbacks are scheduled.
 	/// This is because when callbacks are scheduled too close to a vblank,
 	/// we might send PresentNotifyMsc request too late and miss the vblank event.
 	/// So we request extra vblank events right after the last vblank event
 	/// to make sure this doesn't happen.
 	unsigned int wind_down;
-	struct vblank_callback *callbacks;
-	struct ev_loop *loop;
+	xcb_window_t target_window;
+	enum vblank_scheduler_type type;
+	bool vblank_event_requested;
 };
 
 struct present_vblank_scheduler {
@@ -42,49 +43,27 @@ struct present_vblank_scheduler {
 	/// The timestamp for the end of last vblank.
 	uint64_t last_ust;
 	ev_timer callback_timer;
-	bool vblank_event_requested;
 	xcb_present_event_t event_id;
 	xcb_special_event_t *event;
 };
 
-static void present_vblank_scheduler_schedule(struct present_vblank_scheduler *sched) {
-	log_verbose("Requesting vblank event for window 0x%08x, msc %" PRIu64,
-	            sched->base.target_window, sched->last_msc + 1);
-	assert(!sched->vblank_event_requested);
-	x_request_vblank_event(sched->base.c, sched->base.target_window, sched->last_msc + 1);
-	sched->vblank_event_requested = true;
-}
-
-static void vblank_scheduler_schedule_internal(struct vblank_scheduler *self) {
-	switch (self->type) {
-	case PRESENT_VBLANK_SCHEDULER:
-		return present_vblank_scheduler_schedule((struct present_vblank_scheduler *)self);
-	case SGI_VIDEO_VSYNC_VBLANK_SCHEDULER:
-	case LAST_VBLANK_SCHEDULER:
-	default: assert(false);
-	}
-}
+struct vblank_scheduler_ops {
+	void (*init)(struct vblank_scheduler *self);
+	void (*deinit)(struct vblank_scheduler *self);
+	void (*schedule)(struct vblank_scheduler *self);
+	bool (*handle_x_events)(struct vblank_scheduler *self);
+};
 
 static void
-vblank_scheduler_invoke_callbacks(struct vblank_scheduler *self, struct vblank_event *event) {
-	// callbacks might be added during callback invocation, so we need to
-	// copy the callback_count.
-	size_t count = self->callback_count;
-	if (count == 0) {
-		self->wind_down--;
-	} else {
-		self->wind_down = VBLANK_WIND_DOWN;
-	}
-	for (size_t i = 0; i < count; i++) {
-		self->callbacks[i].fn(event, self->callbacks[i].user_data);
-	}
-	// remove the callbacks that we have called, keep the newly added ones.
-	memmove(self->callbacks, self->callbacks + count,
-	        (self->callback_count - count) * sizeof(*self->callbacks));
-	self->callback_count -= count;
-	if (self->callback_count || self->wind_down) {
-		vblank_scheduler_schedule_internal(self);
-	}
+vblank_scheduler_invoke_callbacks(struct vblank_scheduler *self, struct vblank_event *event);
+
+static void present_vblank_scheduler_schedule(struct vblank_scheduler *base) {
+	auto self = (struct present_vblank_scheduler *)base;
+	log_verbose("Requesting vblank event for window 0x%08x, msc %" PRIu64,
+	            base->target_window, self->last_msc + 1);
+	assert(!base->vblank_event_requested);
+	x_request_vblank_event(base->c, base->target_window, self->last_msc + 1);
+	base->vblank_event_requested = true;
 }
 
 static void present_vblank_callback(EV_P attr_unused, ev_timer *w, int attr_unused revents) {
@@ -93,7 +72,7 @@ static void present_vblank_callback(EV_P attr_unused, ev_timer *w, int attr_unus
 	    .msc = sched->last_msc,
 	    .ust = sched->last_ust,
 	};
-	sched->vblank_event_requested = false;
+	sched->base.vblank_event_requested = false;
 	vblank_scheduler_invoke_callbacks(&sched->base, &event);
 }
 
@@ -120,50 +99,6 @@ static void present_vblank_scheduler_deinit(struct vblank_scheduler *base) {
 	xcb_unregister_for_special_event(base->c->c, self->event);
 }
 
-void vblank_scheduler_free(struct vblank_scheduler *self) {
-	switch (self->type) {
-	case PRESENT_VBLANK_SCHEDULER: present_vblank_scheduler_deinit(self); break;
-	case SGI_VIDEO_VSYNC_VBLANK_SCHEDULER: break;
-	case LAST_VBLANK_SCHEDULER:
-	default: assert(false);
-	}
-	free(self->callbacks);
-	free(self);
-}
-
-struct vblank_scheduler *vblank_scheduler_new(struct ev_loop *loop, struct x_connection *c,
-                                              xcb_window_t target_window) {
-	struct vblank_scheduler *self = calloc(1, sizeof(struct present_vblank_scheduler));
-	self->target_window = target_window;
-	self->c = c;
-	self->loop = loop;
-	present_vblank_scheduler_init(self);
-	return self;
-}
-
-bool vblank_scheduler_schedule(struct vblank_scheduler *self,
-                               vblank_callback_t vblank_callback, void *user_data) {
-	if (self->callback_count == 0 && self->wind_down == 0) {
-		vblank_scheduler_schedule_internal(self);
-	}
-	if (self->callback_count == self->callback_capacity) {
-		size_t new_capacity =
-		    self->callback_capacity ? self->callback_capacity * 2 : 1;
-		void *new_buffer =
-		    realloc(self->callbacks, new_capacity * sizeof(*self->callbacks));
-		if (!new_buffer) {
-			return false;
-		}
-		self->callbacks = new_buffer;
-		self->callback_capacity = new_capacity;
-	}
-	self->callbacks[self->callback_count++] = (struct vblank_callback){
-	    .fn = vblank_callback,
-	    .user_data = user_data,
-	};
-	return true;
-}
-
 /// Handle PresentCompleteNotify events
 ///
 /// Schedule the registered callback to be called when the current vblank ends.
@@ -175,7 +110,7 @@ static void handle_present_complete_notify(struct present_vblank_scheduler *self
 		return;
 	}
 
-	assert(self->vblank_event_requested);
+	assert(self->base.vblank_event_requested);
 
 	// X sometimes sends duplicate/bogus MSC events, when screen has just been turned
 	// off. Don't use the msc value in these events. We treat this as not receiving a
@@ -213,9 +148,10 @@ static void handle_present_complete_notify(struct present_vblank_scheduler *self
 	ev_timer_start(self->base.loop, &self->callback_timer);
 }
 
-static bool handle_present_events(struct present_vblank_scheduler *self) {
+static bool handle_present_events(struct vblank_scheduler *base) {
+	auto self = (struct present_vblank_scheduler *)base;
 	xcb_present_generic_event_t *ev;
-	while ((ev = (void *)xcb_poll_for_special_event(self->base.c->c, self->event))) {
+	while ((ev = (void *)xcb_poll_for_special_event(base->c->c, self->event))) {
 		if (ev->event != self->event_id) {
 			// This event doesn't have the right event context, it's not meant
 			// for us.
@@ -230,13 +166,94 @@ static bool handle_present_events(struct present_vblank_scheduler *self) {
 	}
 	return true;
 }
+
+static const struct vblank_scheduler_ops vblank_scheduler_ops[LAST_VBLANK_SCHEDULER] = {
+    [PRESENT_VBLANK_SCHEDULER] =
+        {
+            .init = present_vblank_scheduler_init,
+            .deinit = present_vblank_scheduler_deinit,
+            .schedule = present_vblank_scheduler_schedule,
+            .handle_x_events = handle_present_events,
+        },
+};
+
+static void vblank_scheduler_schedule_internal(struct vblank_scheduler *self) {
+	assert(self->type < LAST_VBLANK_SCHEDULER);
+	auto fn = vblank_scheduler_ops[self->type].schedule;
+	assert(fn != NULL);
+	fn(self);
+}
+
+bool vblank_scheduler_schedule(struct vblank_scheduler *self,
+                               vblank_callback_t vblank_callback, void *user_data) {
+	if (self->callback_count == 0 && self->wind_down == 0) {
+		vblank_scheduler_schedule_internal(self);
+	}
+	if (self->callback_count == self->callback_capacity) {
+		size_t new_capacity =
+		    self->callback_capacity ? self->callback_capacity * 2 : 1;
+		void *new_buffer =
+		    realloc(self->callbacks, new_capacity * sizeof(*self->callbacks));
+		if (!new_buffer) {
+			return false;
+		}
+		self->callbacks = new_buffer;
+		self->callback_capacity = new_capacity;
+	}
+	self->callbacks[self->callback_count++] = (struct vblank_callback){
+	    .fn = vblank_callback,
+	    .user_data = user_data,
+	};
+	return true;
+}
+
+static void
+vblank_scheduler_invoke_callbacks(struct vblank_scheduler *self, struct vblank_event *event) {
+	// callbacks might be added during callback invocation, so we need to
+	// copy the callback_count.
+	size_t count = self->callback_count;
+	if (count == 0) {
+		self->wind_down--;
+	} else {
+		self->wind_down = VBLANK_WIND_DOWN;
+	}
+	for (size_t i = 0; i < count; i++) {
+		self->callbacks[i].fn(event, self->callbacks[i].user_data);
+	}
+	// remove the callbacks that we have called, keep the newly added ones.
+	memmove(self->callbacks, self->callbacks + count,
+	        (self->callback_count - count) * sizeof(*self->callbacks));
+	self->callback_count -= count;
+	if (self->callback_count || self->wind_down) {
+		vblank_scheduler_schedule_internal(self);
+	}
+}
+
+void vblank_scheduler_free(struct vblank_scheduler *self) {
+	assert(self->type < LAST_VBLANK_SCHEDULER);
+	auto fn = vblank_scheduler_ops[self->type].deinit;
+	if (fn != NULL) {
+		fn(self);
+	}
+	free(self->callbacks);
+	free(self);
+}
+
+struct vblank_scheduler *vblank_scheduler_new(struct ev_loop *loop, struct x_connection *c,
+                                              xcb_window_t target_window) {
+	struct vblank_scheduler *self = calloc(1, sizeof(struct present_vblank_scheduler));
+	self->target_window = target_window;
+	self->c = c;
+	self->loop = loop;
+	vblank_scheduler_ops[PRESENT_VBLANK_SCHEDULER].init(self);
+	return self;
+}
+
 bool vblank_handle_x_events(struct vblank_scheduler *self) {
-	switch (self->type) {
-	case PRESENT_VBLANK_SCHEDULER:
-		return handle_present_events((struct present_vblank_scheduler *)self);
-	case SGI_VIDEO_VSYNC_VBLANK_SCHEDULER: return true;
-	case LAST_VBLANK_SCHEDULER:
-	default: assert(false);
+	assert(self->type < LAST_VBLANK_SCHEDULER);
+	auto fn = vblank_scheduler_ops[self->type].handle_x_events;
+	if (fn != NULL) {
+		return fn(self);
 	}
 	return true;
 }
