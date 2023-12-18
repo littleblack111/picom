@@ -154,6 +154,12 @@ void collect_vblank_interval_statistics(struct vblank_event *e, void *ud) {
 		return;
 	}
 
+	if (!ps->o.debug_options.smart_frame_pacing) {
+		// We don't need to collect statistics if we are not doing smart frame
+		// pacing.
+		return;
+	}
+
 	// TODO(yshui): this naive method of estimating vblank interval does not handle
 	//              the variable refresh rate case very well. This includes the case
 	//              of a VRR enabled monitor; or a monitor that's turned off, in which
@@ -212,13 +218,15 @@ void schedule_render_at_vblank(struct vblank_event *e, void *ud) {
 	}
 
 	// The frame has been finished and presented, record its render time.
-	int render_time_us =
-	    (int)(render_time.tv_sec * 1000000L + render_time.tv_nsec / 1000L);
-	render_statistics_add_render_time_sample(
-	    &ps->render_stats, render_time_us + (int)ps->last_schedule_delay);
-	log_verbose("Last render call took: %d (gpu) + %d (cpu) us, "
-	          "last_msc: %" PRIu64,
-	          render_time_us, (int)ps->last_schedule_delay, ps->last_msc);
+	if (ps->o.debug_options.smart_frame_pacing) {
+		int render_time_us =
+		    (int)(render_time.tv_sec * 1000000L + render_time.tv_nsec / 1000L);
+		render_statistics_add_render_time_sample(
+		    &ps->render_stats, render_time_us + (int)ps->last_schedule_delay);
+		log_verbose("Last render call took: %d (gpu) + %d (cpu) us, "
+		            "last_msc: %" PRIu64,
+		            render_time_us, (int)ps->last_schedule_delay, ps->last_msc);
+	}
 	ps->last_schedule_delay = 0;
 	ps->backend_busy = false;
 
@@ -230,8 +238,8 @@ void schedule_render_at_vblank(struct vblank_event *e, void *ud) {
 		delay_s = (double)(ps->next_render - now_us) / 1000000.0;
 	}
 	log_verbose("Prepare to start rendering: delay: %f s, next_render: %" PRIu64
-	          ", now_us: %" PRIu64,
-	          delay_s, ps->next_render, now_us);
+	            ", now_us: %" PRIu64,
+	            delay_s, ps->next_render, now_us);
 	assert(!ev_is_active(&ps->draw_timer));
 	ev_timer_set(&ps->draw_timer, delay_s, 0);
 	ev_timer_start(ps->loop, &ps->draw_timer);
@@ -310,6 +318,9 @@ void schedule_render(session_t *ps, bool triggered_by_vblank attr_unused) {
 		return;
 	}
 
+	// if ps->o.debug_options.smart_frame_pacing is false, we won't have any render
+	// time or vblank interval estimates, so we would naturally fallback to schedule
+	// render immediately.
 	auto render_budget = render_statistics_get_budget(&ps->render_stats, &divisor);
 	auto frame_time = render_statistics_get_vblank_time(&ps->render_stats);
 	if (frame_time == 0) {
@@ -337,11 +348,12 @@ void schedule_render(session_t *ps, bool triggered_by_vblank attr_unused) {
 		         delay_s, render_budget, frame_time, now_us, deadline);
 	}
 
-	log_verbose("Delay: %.6lf s, last_msc: %" PRIu64 ", render_budget: %d, frame_time: "
-	          "%" PRIu32 ", now_us: %" PRIu64 ", next_msc: %" PRIu64 ", "
-	          "divisor: %d",
-	          delay_s, ps->last_msc_instant, render_budget, frame_time, now_us,
-	          deadline, divisor);
+	log_verbose("Delay: %.6lf s, last_msc: %" PRIu64 ", render_budget: %d, "
+	            "frame_time: "
+	            "%" PRIu32 ", now_us: %" PRIu64 ", next_msc: %" PRIu64 ", "
+	            "divisor: %d",
+	            delay_s, ps->last_msc_instant, render_budget, frame_time, now_us,
+	            deadline, divisor);
 
 schedule:
 	ps->render_queued = true;
