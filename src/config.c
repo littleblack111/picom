@@ -623,11 +623,13 @@ struct debug_options_entry {
 	size_t offset;
 };
 
+// clang-format off
+static const char *vblank_scheduler_choices[] = { "present", "sgi_video_sync", NULL };
 static const struct debug_options_entry debug_options_entries[] = {
-    "smart_frame_pacing",
-    NULL,
-    offsetof(struct debug_options, smart_frame_pacing),
+    {"smart_frame_pacing", NULL,                     offsetof(struct debug_options, smart_frame_pacing)},
+    {"force_vblank_sched", vblank_scheduler_choices, offsetof(struct debug_options, force_vblank_scheduler)},
 };
+// clang-format on
 
 void parse_debug_option_single(char *setting, struct debug_options *debug_options) {
 	char *equal = strchr(setting, '=');
@@ -667,7 +669,9 @@ void parse_debug_option_single(char *setting, struct debug_options *debug_option
 /// Parse debug options from environment variable `PICOM_DEBUG`.
 void parse_debug_options(struct debug_options *debug_options) {
 	const char *debug = getenv("PICOM_DEBUG");
-	const struct debug_options default_debug_options = {};
+	const struct debug_options default_debug_options = {
+	    .force_vblank_scheduler = LAST_VBLANK_SCHEDULER,
+	};
 
 	*debug_options = default_debug_options;
 	if (!debug) {
