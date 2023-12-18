@@ -75,9 +75,9 @@ typedef struct _c2_lptr c2_lptr_t;
 
 enum vblank_scheduler_type {
 	/// X Present extension based vblank events
-	PRESENT_VBLANK_SCHEDULER,
+	VBLANK_SCHEDULER_PRESENT,
 	/// GLX_SGI_video_sync based vblank events
-	SGI_VIDEO_SYNC_VBLANK_SCHEDULER,
+	VBLANK_SCHEDULER_SGI_VIDEO_SYNC,
 	/// An invalid scheduler, served as a scheduler count, and
 	/// as a sentinel value.
 	LAST_VBLANK_SCHEDULER,
@@ -85,8 +85,8 @@ enum vblank_scheduler_type {
 
 static inline const char *vblank_scheduler_type_str(enum vblank_scheduler_type type) {
 	switch (type) {
-	case PRESENT_VBLANK_SCHEDULER: return "present";
-	case SGI_VIDEO_SYNC_VBLANK_SCHEDULER: return "sgi_video_sync";
+	case VBLANK_SCHEDULER_PRESENT: return "present";
+	case VBLANK_SCHEDULER_SGI_VIDEO_SYNC: return "sgi_video_sync";
 	default: return "invalid";
 	}
 }

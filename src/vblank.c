@@ -269,7 +269,7 @@ static void sgi_video_sync_scheduler_init(struct vblank_scheduler *base) {
 	pthread_mutex_init(&args.start_mtx, NULL);
 	pthread_cond_init(&args.start_cnd, NULL);
 
-	base->type = SGI_VIDEO_SYNC_VBLANK_SCHEDULER;
+	base->type = VBLANK_SCHEDULER_SGI_VIDEO_SYNC;
 	ev_async_init(&self->notify, sgi_video_sync_scheduler_callback);
 	ev_async_start(base->loop, &self->notify);
 	pthread_mutex_init(&self->vblank_requested_mtx, NULL);
@@ -328,7 +328,7 @@ static void present_vblank_callback(EV_P attr_unused, ev_timer *w, int attr_unus
 
 static void present_vblank_scheduler_init(struct vblank_scheduler *base) {
 	auto self = (struct present_vblank_scheduler *)base;
-	base->type = PRESENT_VBLANK_SCHEDULER;
+	base->type = VBLANK_SCHEDULER_PRESENT;
 	ev_timer_init(&self->callback_timer, present_vblank_callback, 0, 0);
 
 	self->event_id = x_new_id(base->c);
@@ -354,7 +354,7 @@ static void present_vblank_scheduler_deinit(struct vblank_scheduler *base) {
 /// Schedule the registered callback to be called when the current vblank ends.
 static void handle_present_complete_notify(struct present_vblank_scheduler *self,
                                            xcb_present_complete_notify_event_t *cne) {
-	assert(self->base.type == PRESENT_VBLANK_SCHEDULER);
+	assert(self->base.type == VBLANK_SCHEDULER_PRESENT);
 
 	if (cne->kind != XCB_PRESENT_COMPLETE_KIND_NOTIFY_MSC) {
 		return;
@@ -418,7 +418,7 @@ static bool handle_present_events(struct vblank_scheduler *base) {
 }
 
 static const struct vblank_scheduler_ops vblank_scheduler_ops[LAST_VBLANK_SCHEDULER] = {
-    [PRESENT_VBLANK_SCHEDULER] =
+    [VBLANK_SCHEDULER_PRESENT] =
         {
             .size = sizeof(struct present_vblank_scheduler),
             .init = present_vblank_scheduler_init,
@@ -427,7 +427,7 @@ static const struct vblank_scheduler_ops vblank_scheduler_ops[LAST_VBLANK_SCHEDU
             .handle_x_events = handle_present_events,
         },
 #ifdef CONFIG_OPENGL
-    [SGI_VIDEO_SYNC_VBLANK_SCHEDULER] =
+    [VBLANK_SCHEDULER_SGI_VIDEO_SYNC] =
         {
             .size = sizeof(struct sgi_video_sync_vblank_scheduler),
             .init = sgi_video_sync_scheduler_init,
