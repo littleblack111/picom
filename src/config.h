@@ -77,7 +77,7 @@ enum vblank_scheduler_type {
 	/// X Present extension based vblank events
 	PRESENT_VBLANK_SCHEDULER,
 	/// GLX_SGI_video_sync based vblank events
-	SGI_VIDEO_VSYNC_VBLANK_SCHEDULER,
+	SGI_VIDEO_SYNC_VBLANK_SCHEDULER,
 	/// An invalid scheduler, served as a scheduler count, and
 	/// as a sentinel value.
 	LAST_VBLANK_SCHEDULER,

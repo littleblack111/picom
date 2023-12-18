@@ -8,6 +8,7 @@
 #include <ev.h>
 #include <xcb/xproto.h>
 
+#include "config.h"
 #include "x.h"
 
 /// An object that schedule vblank events.
@@ -31,7 +32,8 @@ typedef void (*vblank_callback_t)(struct vblank_event *event, void *user_data);
 bool vblank_scheduler_schedule(struct vblank_scheduler *self, vblank_callback_t cb,
                                void *user_data);
 struct vblank_scheduler *
-vblank_scheduler_new(struct ev_loop *loop, struct x_connection *c, xcb_window_t target_window);
+vblank_scheduler_new(struct ev_loop *loop, struct x_connection *c,
+                     xcb_window_t target_window, enum vblank_scheduler_type type);
 void vblank_scheduler_free(struct vblank_scheduler *);
 
 bool vblank_handle_x_events(struct vblank_scheduler *self);

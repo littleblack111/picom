@@ -1490,7 +1490,8 @@ static bool redirect_start(session_t *ps) {
 		ps->last_schedule_delay = 0;
 		render_statistics_reset(&ps->render_stats);
 		ps->vblank_scheduler =
-		    vblank_scheduler_new(ps->loop, &ps->c, session_get_target_window(ps));
+		    vblank_scheduler_new(ps->loop, &ps->c, session_get_target_window(ps),
+		                         PRESENT_VBLANK_SCHEDULER);
 		if (!ps->vblank_scheduler) {
 			return false;
 		}
