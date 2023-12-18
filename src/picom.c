@@ -351,6 +351,7 @@ void schedule_render(session_t *ps, bool triggered_by_vblank attr_unused) {
 		// We don't have enough data for render time estimates, maybe there's
 		// no frame rendered yet, or the backend doesn't support render timing
 		// information, schedule render immediately.
+		log_verbose("Not enough data for render time estimates.");
 		goto schedule;
 	}
 
@@ -359,6 +360,8 @@ void schedule_render(session_t *ps, bool triggered_by_vblank attr_unused) {
 		// vblank interval, there is no way we can make it. Instead of always
 		// dropping frames, we try desperately to catch up and schedule a
 		// render immediately.
+		log_verbose("Render budget: %u us >= frame time: %" PRIu32 " us",
+		            render_budget, frame_time);
 		goto schedule;
 	}
 
