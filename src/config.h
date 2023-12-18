@@ -83,6 +83,14 @@ enum vblank_scheduler_type {
 	LAST_VBLANK_SCHEDULER,
 };
 
+static inline const char *vblank_scheduler_type_str(enum vblank_scheduler_type type) {
+	switch (type) {
+	case PRESENT_VBLANK_SCHEDULER: return "present";
+	case SGI_VIDEO_SYNC_VBLANK_SCHEDULER: return "sgi_video_sync";
+	default: return "invalid";
+	}
+}
+
 /// Internal, private options for debugging and development use.
 struct debug_options {
 	/// Try to reduce frame latency by using vblank interval and render time
