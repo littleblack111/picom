@@ -40,6 +40,8 @@ struct present_vblank_scheduler {
 };
 
 static void present_vblank_scheduler_schedule(struct present_vblank_scheduler *sched) {
+	log_verbose("Requesting vblank event for window 0x%08x, msc %" PRIu64,
+	            sched->base.target_window, sched->last_msc + 1);
 	assert(!sched->vblank_event_requested);
 	x_request_vblank_event(sched->base.c, sched->base.target_window, sched->last_msc + 1);
 	sched->vblank_event_requested = true;
