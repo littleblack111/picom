@@ -93,6 +93,33 @@ enum blur_method {
 
 typedef struct _c2_lptr c2_lptr_t;
 
+enum vblank_scheduler_type {
+	/// X Present extension based vblank events
+	VBLANK_SCHEDULER_PRESENT,
+	/// GLX_SGI_video_sync based vblank events
+	VBLANK_SCHEDULER_SGI_VIDEO_SYNC,
+	/// An invalid scheduler, served as a scheduler count, and
+	/// as a sentinel value.
+	LAST_VBLANK_SCHEDULER,
+};
+
+static inline const char *vblank_scheduler_type_str(enum vblank_scheduler_type type) {
+	switch (type) {
+	case VBLANK_SCHEDULER_PRESENT: return "present";
+	case VBLANK_SCHEDULER_SGI_VIDEO_SYNC: return "sgi_video_sync";
+	default: return "invalid";
+	}
+}
+
+/// Internal, private options for debugging and development use.
+struct debug_options {
+	/// Try to reduce frame latency by using vblank interval and render time
+	/// estimates. Right now it's not working well across drivers.
+	int smart_frame_pacing;
+	/// Override the vblank scheduler chosen by the compositor.
+	int force_vblank_scheduler;
+};
+
 /// Structure representing all options.
 typedef struct options {
 	// === Debugging ===
@@ -316,6 +343,8 @@ typedef struct options {
 	c2_lptr_t *transparent_clipping_blacklist;
 
 	bool dithered_present;
+
+	struct debug_options debug_options;
 } options_t;
 
 extern const char *const BACKEND_STRS[NUM_BKEND + 1];
