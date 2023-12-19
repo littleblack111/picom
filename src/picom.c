@@ -1649,8 +1649,8 @@ static bool redirect_start(session_t *ps) {
 	}
 
 	ps->frame_pacing = !ps->o.no_frame_pacing;
-	// if ((ps->o.legacy_backends || ps->o.benchmark || !ps->backend_data->ops->last_render_time) &&
-	if ((ps->o.legacy_backends || ps->o.animations || ps->o.benchmark || !ps->backend_data->ops->last_render_time) &&
+	// if ((ps->o.legacy_backends || ps->o.animations || ps->o.benchmark || !ps->backend_data->ops->last_render_time) &&
+	if ((ps->o.legacy_backends || ps->o.benchmark || !ps->backend_data->ops->last_render_time) &&
 	    ps->frame_pacing) {
 		// Disable frame pacing if we are using a legacy backend or if we are in
 		// benchmark mode, or if the backend doesn't report render time
@@ -1999,11 +1999,6 @@ static void draw_callback_impl(EV_P_ session_t *ps, int revents attr_unused) {
 
 	ps->render_queued = false;
 
-	// Queue redraw if animation is running. This should be picked up by next present
-	// event.
-	if (!animation_running) {
-		queue_redraw(ps);
-	}
 	if (ps->vblank_scheduler) {
 		// Even if we might not want to render during next vblank, we want to keep
 		// `backend_busy` up to date, so when the next render comes, we can
