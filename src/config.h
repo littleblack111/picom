@@ -103,13 +103,7 @@ enum vblank_scheduler_type {
 	LAST_VBLANK_SCHEDULER,
 };
 
-static inline const char *vblank_scheduler_type_str(enum vblank_scheduler_type type) {
-	switch (type) {
-	case VBLANK_SCHEDULER_PRESENT: return "present";
-	case VBLANK_SCHEDULER_SGI_VIDEO_SYNC: return "sgi_video_sync";
-	default: return "invalid";
-	}
-}
+extern const char *vblank_scheduler_str[];
 
 /// Internal, private options for debugging and development use.
 struct debug_options {

@@ -134,17 +134,6 @@ struct shader_info {
 	UT_hash_handle hh;
 };
 
-enum render_progress {
-	/// Render is finished and presented to the screen.
-	RENDER_IDLE = 0,
-	/// Rendering is queued, but not started yet.
-	RENDER_QUEUED,
-	/// Backend has been called, render commands have been issued.
-	RENDER_STARTED,
-	/// Backend reported render commands have been finished. (not actually used).
-	RENDER_FINISHED,
-};
-
 /// Structure containing all necessary data for a session.
 typedef struct session {
 	// === Event handlers ===

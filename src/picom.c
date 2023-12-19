@@ -227,9 +227,9 @@ void collect_vblank_interval_statistics(struct vblank_event *e, void *ud) {
 
 void schedule_render(session_t *ps, bool triggered_by_vblank);
 
-/// vblank callback scheduled by schedule_render.
+/// vblank callback scheduled by schedule_render, when a render is ongoing.
 ///
-/// Check if previously queued render has finished, and record the time it took.
+/// Check if previously queued render has finished, and reschedule render if it has.
 void reschedule_render_at_vblank(struct vblank_event *e, void *ud) {
 	auto ps = (session_t *)ud;
 	assert(ps->frame_pacing);
@@ -1675,8 +1675,7 @@ static bool redirect_start(session_t *ps) {
 			scheduler_type =
 			    (enum vblank_scheduler_type)ps->o.debug_options.force_vblank_scheduler;
 		}
-		log_info("Using vblank scheduler: %s.",
-		         vblank_scheduler_type_str(scheduler_type));
+		log_info("Using vblank scheduler: %s.", vblank_scheduler_str[scheduler_type]);
 		ps->vblank_scheduler = vblank_scheduler_new(
 		    ps->loop, &ps->c, session_get_target_window(ps), scheduler_type);
 		if (!ps->vblank_scheduler) {

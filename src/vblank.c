@@ -7,6 +7,7 @@
 #include <time.h>
 #include <xcb/xcb.h>
 #include <xcb/xproto.h>
+#include "config.h"
 
 #ifdef CONFIG_OPENGL
 // Enable sgi_video_sync_vblank_scheduler

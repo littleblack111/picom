@@ -624,10 +624,14 @@ struct debug_options_entry {
 };
 
 // clang-format off
-static const char *vblank_scheduler_choices[] = { "present", "sgi_video_sync", NULL };
+const char *vblank_scheduler_str[] = {
+	[VBLANK_SCHEDULER_PRESENT] = "present",
+	[VBLANK_SCHEDULER_SGI_VIDEO_SYNC] = "sgi_video_sync",
+	[LAST_VBLANK_SCHEDULER] = NULL
+};
 static const struct debug_options_entry debug_options_entries[] = {
-    {"smart_frame_pacing", NULL,                     offsetof(struct debug_options, smart_frame_pacing)},
-    {"force_vblank_sched", vblank_scheduler_choices, offsetof(struct debug_options, force_vblank_scheduler)},
+    {"smart_frame_pacing", NULL,                 offsetof(struct debug_options, smart_frame_pacing)},
+    {"force_vblank_sched", vblank_scheduler_str, offsetof(struct debug_options, force_vblank_scheduler)},
 };
 // clang-format on
 
@@ -655,11 +659,14 @@ void parse_debug_option_single(char *setting, struct debug_options *debug_option
 			}
 			if (!parse_int(arg, value)) {
 				log_error("Invalid value for debug option %s: %s, it "
-				          "will be ignored",
-				          setting, arg);
+				          "will be ignored.",
+				          debug_options_entries[i].name, arg);
 			}
-		} else {
+		} else if (debug_options_entries[i].choices == NULL) {
 			*value = 1;
+		} else {
+			log_error(
+			    "Missing value for debug option %s, it will be ignored.", setting);
 		}
 		return;
 	}
