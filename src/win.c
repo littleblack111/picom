@@ -485,7 +485,7 @@ static void init_animation(session_t *ps, struct managed_win *w) {
 	static double *anim_x, *anim_y, *anim_w, *anim_h;
 	enum open_window_animation animation;
 
-	
+
 	animation = ps->o.animation_for_open_window;
 
 	if (w->window_type != WINTYPE_TOOLTIP &&
@@ -1538,8 +1538,12 @@ void win_on_win_size_change(session_t *ps, struct managed_win *w) {
 	       w->state != WSTATE_UNMAPPING);
 
 	// Invalidate the shadow we built
-	win_set_flags(w, WIN_FLAGS_IMAGES_STALE);
-	win_release_mask(ps->backend_data, w);
+	// Do not set flags if window is unmapping and animation is running
+	if (w->state != WSTATE_UNMAPPED && w->state != WSTATE_DESTROYING &&
+	       w->state != WSTATE_UNMAPPING) {
+		win_set_flags(w, WIN_FLAGS_IMAGES_STALE);
+		win_release_mask(ps->backend_data, w);
+	}
 	ps->pending_updates = true;
 	free_paint(ps, &w->shadow_paint);
 }

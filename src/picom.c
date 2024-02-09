@@ -1051,7 +1051,7 @@ paint_preprocess(session_t *ps, bool *fade_running, bool *animation_running) {
 				}
 
 			// Submit window size change
-			if (size_changed && w->state != WSTATE_UNMAPPED && w->state != WSTATE_DESTROYING && w->state != WSTATE_UNMAPPING) {
+			if (size_changed) {
 				win_on_win_size_change(ps, w);
 
 				pixman_region32_clear(&w->bounding_shape);
@@ -1059,8 +1059,10 @@ paint_preprocess(session_t *ps, bool *fade_running, bool *animation_running) {
 				pixman_region32_init_rect(&w->bounding_shape, 0, 0,
 				                          (uint)w->widthb, (uint)w->heightb);
 
-				win_clear_flags(w, WIN_FLAGS_PIXMAP_STALE);
-				win_process_image_flags(ps, w);
+				if (w->state != WSTATE_UNMAPPED && w->state != WSTATE_DESTROYING && w->state != WSTATE_UNMAPPING) {
+					win_clear_flags(w, WIN_FLAGS_PIXMAP_STALE);
+					win_process_image_flags(ps, w);
+				}
 			}
 			// Mark new window region with damage
 			if (was_painted && geometry_changed) {
