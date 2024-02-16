@@ -19,6 +19,7 @@
 #include <fcntl.h>
 #include <inttypes.h>
 #include <math.h>
+#include <pthread.h>
 #include <sched.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -34,6 +35,7 @@
 #include <xcb/randr.h>
 #include <xcb/render.h>
 #include <xcb/sync.h>
+#include <xcb/xcb_aux.h>
 #include <xcb/xfixes.h>
 
 #include <ev.h>
@@ -209,11 +211,13 @@ collect_vblank_interval_statistics(struct vblank_event *e, void *ud) {
 			if (frame_count == 1) {
 				render_statistics_add_vblank_time_sample(
 				    &ps->render_stats, frame_time);
-				log_trace("Frame count %lu, frame time: %d us, ust: "
-				          "%" PRIu64 "",
+				log_trace("Frame count %" PRIu64 ", frame time: %d us, "
+				          "ust: "
+				          "%" PRIu64,
 				          frame_count, frame_time, e->ust);
 			} else {
-				log_trace("Frame count %lu, frame time: %d us, msc: "
+				log_trace("Frame count %" PRIu64 ", frame time: %d us, "
+				          "msc: "
 				          "%" PRIu64 ", not adding sample.",
 				          frame_count, frame_time, e->ust);
 			}
@@ -787,6 +791,8 @@ err:
 
 /// Handle configure event of the root window
 static void configure_root(session_t *ps) {
+	// TODO(yshui) re-initializing backend should be done outside of the
+	// critical section. Probably set a flag and do it in draw_callback_impl.
 	auto r = XCB_AWAIT(xcb_get_geometry, ps->c.c, ps->c.screen_info->root);
 	if (!r) {
 		log_fatal("Failed to fetch root geometry");
@@ -824,6 +830,13 @@ static void configure_root(session_t *ps) {
 	if (top_w) {
 		rc_region_unref(&top_w->reg_ignore);
 		top_w->reg_ignore_valid = false;
+	}
+
+	// Whether a window is fullscreen depends on the new screen
+	// size. So we need to refresh the fullscreen state of all
+	// windows.
+	win_stack_foreach_managed(w, &ps->window_stack) {
+		win_update_is_fullscreen(ps, w);
 	}
 
 	if (ps->redirected) {
@@ -1243,7 +1256,7 @@ paint_preprocess(session_t *ps, bool *fade_running, bool *animation_running) {
 		// is not correctly set.
 		if (ps->o.unredir_if_possible && is_highest) {
 			if (w->mode == WMODE_SOLID && !ps->o.force_win_blend &&
-			    win_is_fullscreen(ps, w) && !w->unredir_if_possible_excluded) {
+			    w->is_fullscreen && !w->unredir_if_possible_excluded) {
 				unredir_possible = true;
 			}
 		}
@@ -1358,7 +1371,7 @@ void root_damaged(session_t *ps) {
 			xcb_visualid_t visual =
 			    r->depth == ps->c.screen_info->root_depth
 			        ? ps->c.screen_info->root_visual
-			        : x_get_visual_for_depth(&ps->c, r->depth);
+			        : x_get_visual_for_depth(ps->c.screen_info, r->depth);
 			free(r);
 
 			ps->root_image = ps->backend_data->ops->bind_pixmap(
@@ -1488,11 +1501,10 @@ static int register_cm(session_t *ps) {
 	}
 
 	// Set COMPTON_VERSION
-	e = xcb_request_check(
-	    ps->c.c, xcb_change_property_checked(
-	                 ps->c.c, XCB_PROP_MODE_REPLACE, ps->reg_win,
-	                 get_atom(ps->atoms, "COMPTON_VERSION"), XCB_ATOM_STRING, 8,
-	                 (uint32_t)strlen(PICOM_VERSION), PICOM_VERSION));
+	e = xcb_request_check(ps->c.c, xcb_change_property_checked(
+	                                   ps->c.c, XCB_PROP_MODE_REPLACE, ps->reg_win,
+	                                   ps->atoms->aCOMPTON_VERSION, XCB_ATOM_STRING, 8,
+	                                   (uint32_t)strlen(PICOM_VERSION), PICOM_VERSION));
 	if (e) {
 		log_error_x_error(e, "Failed to set COMPTON_VERSION.");
 		free(e);
@@ -1508,7 +1520,7 @@ static int register_cm(session_t *ps) {
 			log_fatal("Failed to allocate memory");
 			return -1;
 		}
-		atom = get_atom(ps->atoms, buf);
+		atom = get_atom(ps->atoms, buf, ps->c.c);
 		free(buf);
 
 		xcb_get_selection_owner_reply_t *reply = xcb_get_selection_owner_reply(
@@ -1672,7 +1684,7 @@ static bool redirect_start(session_t *ps) {
 		return false;
 	}
 
-	x_sync(&ps->c);
+	xcb_aux_sync(ps->c.c);
 
 	if (!initialize_backend(ps)) {
 		return false;
@@ -1731,7 +1743,7 @@ static bool redirect_start(session_t *ps) {
 	}
 
 	// Must call XSync() here
-	x_sync(&ps->c);
+	xcb_aux_sync(ps->c.c);
 
 	ps->redirected = true;
 	ps->first_frame = true;
@@ -1774,15 +1786,38 @@ static void unredirect(session_t *ps) {
 	}
 
 	// Must call XSync() here
-	x_sync(&ps->c);
+	xcb_aux_sync(ps->c.c);
 
 	ps->redirected = false;
 	log_debug("Screen unredirected.");
 }
 
-// Handle queued events before we go to sleep
+/// Handle queued events before we go to sleep.
+///
+/// This function is called by ev_prepare watcher, which is called just before
+/// the event loop goes to sleep. X damage events are incremental, which means
+/// if we don't handle the ones X server already sent us, we won't get new ones.
+/// And if we don't get new ones, we won't render, i.e. we would freeze. libxcb
+/// keeps an internal queue of events, so we have to be 100% sure no events are
+/// left in that queue before we go to sleep.
 static void handle_queued_x_events(EV_P attr_unused, ev_prepare *w, int revents attr_unused) {
 	session_t *ps = session_ptr(w, event_check);
+	// Flush because if we go into sleep when there is still requests in the
+	// outgoing buffer, they will not be sent for an indefinite amount of
+	// time. Use XFlush here too, we might still use some Xlib functions
+	// because OpenGL.
+	//
+	// Also note, after we have flushed here, we won't flush again in this
+	// function before going into sleep. This is because `xcb_flush`/`XFlush`
+	// may _read_ more events from the server (yes, this is ridiculous, I
+	// know). And we can't have that, see the comments above this function.
+	//
+	// This means if functions called ev_handle need to send some events,
+	// they need to carefully make sure those events are flushed, one way or
+	// another.
+	XFlush(ps->c.dpy);
+	xcb_flush(ps->c.c);
+
 	if (ps->vblank_scheduler) {
 		vblank_handle_x_events(ps->vblank_scheduler);
 	}
@@ -1792,13 +1827,6 @@ static void handle_queued_x_events(EV_P attr_unused, ev_prepare *w, int revents 
 		ev_handle(ps, ev);
 		free(ev);
 	};
-	// Flush because if we go into sleep when there is still
-	// requests in the outgoing buffer, they will not be sent
-	// for an indefinite amount of time.
-	// Use XFlush here too, we might still use some Xlib functions
-	// because OpenGL.
-	XFlush(ps->c.dpy);
-	xcb_flush(ps->c.c);
 	int err = xcb_connection_has_error(ps->c.c);
 	if (err) {
 		log_fatal("X11 server connection broke (error %d)", err);
@@ -2426,6 +2454,7 @@ static session_t *session_init(int argc, char **argv, Display *dpy,
 	      c2_list_postprocess(ps, ps->o.opacity_rules) &&
 	      c2_list_postprocess(ps, ps->o.rounded_corners_blacklist) &&
 	      c2_list_postprocess(ps, ps->o.focus_blacklist) &&
+	      c2_list_postprocess(ps, ps->o.corner_radius_rules) &&
 	      c2_list_postprocess(ps, ps->o.animation_blacklist))) {
 		log_error("Post-processing of conditionals failed, some of your rules "
 		          "might not work");
@@ -2765,21 +2794,24 @@ void set_rr_scheduling(void) {
 
 	int ret;
 	struct sched_param param;
-
-	ret = sched_getparam(0, &param);
+	int old_policy;
+	ret = pthread_getschedparam(pthread_self(), &old_policy, &param);
 	if (ret != 0) {
 		log_debug("Failed to get old scheduling priority");
 		return;
 	}
 
 	param.sched_priority = priority;
-	ret = sched_setscheduler(0, SCHED_RR, &param);
+
+	ret = pthread_setschedparam(pthread_self(), SCHED_RR, &param);
 	if (ret != 0) {
 		log_info("Failed to set real-time scheduling priority to %d. Consider "
-		         "giving picom the CAP_SYS_NICE capability",
+		         "giving picom the CAP_SYS_NICE capability or equivalent "
+		         "support.",
 		         priority);
 		return;
 	}
+
 	log_info("Set real-time scheduling priority to %d", priority);
 }
 
@@ -2795,11 +2827,6 @@ static void session_destroy(session_t *ps) {
 	if (ps->redirected) {
 		unredirect(ps);
 	}
-
-#ifdef CONFIG_OPENGL
-	free(ps->argb_fbconfig);
-	ps->argb_fbconfig = NULL;
-#endif
 
 	file_watch_destroy(ps->loop, ps->file_watch_handle);
 	ps->file_watch_handle = NULL;
@@ -2843,6 +2870,7 @@ static void session_destroy(session_t *ps) {
 	c2_list_free(&ps->o.paint_blacklist, NULL);
 	c2_list_free(&ps->o.unredir_if_possible_blacklist, NULL);
 	c2_list_free(&ps->o.rounded_corners_blacklist, NULL);
+	c2_list_free(&ps->o.corner_radius_rules, NULL);
 	c2_list_free(&ps->o.window_shader_fg_rules, free);
 
 	// Free tracked atom list
@@ -2944,7 +2972,7 @@ static void session_destroy(session_t *ps) {
 #endif
 
 	// Flush all events
-	x_sync(&ps->c);
+	xcb_aux_sync(ps->c.c);
 	ev_io_stop(ps->loop, &ps->xiow);
 	if (ps->o.legacy_backends) {
 		free_conv((conv *)ps->shadow_context);
