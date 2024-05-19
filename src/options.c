@@ -315,7 +315,7 @@ static void usage(const char *argv0, int ret) {
 	}
 }
 
-static const char *shortopts = "D:I:O:r:o:m:l:t:i:e:hscnfFCazGb";
+static const char *shortopts = "D:I:O:r:o:m:l:t:i:e:hscnfCazGb";
 
 /// Get config options that are needed to parse the rest of the options
 /// Return true if we should quit
@@ -325,9 +325,9 @@ bool get_early_config(int argc, char *const *argv, char **config_file, bool *all
 
 	int o = 0, longopt_idx = -1;
 
-	// Pre-parse the commandline arguments to check for --config and invalid
+	// Pre-parse the command line arguments to check for --config and invalid
 	// switches
-	// Must reset optind to 0 here in case we reread the commandline
+	// Must reset optind to 0 here in case we reread the command line
 	// arguments
 	optind = 1;
 	*config_file = NULL;
@@ -379,7 +379,7 @@ bool get_cfg(options_t *opt, int argc, char *const *argv, bool shadow_enable,
 	// instead of commas in atof().
 	setlocale(LC_NUMERIC, "C");
 
-	// Parse commandline arguments. Range checking will be done later.
+	// Parse command line arguments. Range checking will be done later.
 
 	bool failed = false;
 	const char *deprecation_message attr_unused =
@@ -435,7 +435,6 @@ bool get_cfg(options_t *opt, int argc, char *const *argv, bool shadow_enable,
 			opt->wintype_option[WINTYPE_DROPDOWN_MENU].opacity = tmp;
 			break;
 		case 'f':
-		case 'F':
 			fading_enable = true;
 			break;
 		P_CASEINT('r', shadow_radius);
@@ -520,8 +519,9 @@ bool get_cfg(options_t *opt, int argc, char *const *argv, bool shadow_enable,
 			         "--crop-shadow-to-monitor instead.");
 			break;
 		case 274:
-			log_warn("--sw-opti has been deprecated, please remove it from the "
+			log_error("--sw-opti has been deprecated, please remove it from the "
 			         "command line options");
+			failed = true;
 			break;
 		case 275:
 			// --vsync-aggressive
@@ -532,9 +532,10 @@ bool get_cfg(options_t *opt, int argc, char *const *argv, bool shadow_enable,
 		P_CASEBOOL(276, use_ewmh_active_win);
 		case 277:
 			// --respect-prop-shadow
-			log_warn("--respect-prop-shadow option has been deprecated, its "
+			log_error("--respect-prop-shadow option has been deprecated, its "
 			         "functionality will always be enabled. Please remove it "
 			         "from the command line options");
+			failed = true;
 			break;
 		P_CASEBOOL(278, unredir_if_possible);
 		case 279:
@@ -730,7 +731,7 @@ bool get_cfg(options_t *opt, int argc, char *const *argv, bool shadow_enable,
 			opt->blur_strength = atoi(optarg);
 			break;
 		case 333:
-			// --cornor-radius
+			// --corner-radius
 			opt->corner_radius = atoi(optarg);
 			break;
 		case 334:

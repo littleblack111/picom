@@ -59,11 +59,11 @@ safe_isnan(double a) {
 /// being always true or false.
 #define ASSERT_IN_RANGE(var, lower, upper)                                               \
 	do {                                                                             \
-		auto __tmp attr_unused = (var);                                          \
+		auto __assert_in_range_tmp attr_unused = (var);                          \
 		_Pragma("GCC diagnostic push");                                          \
 		_Pragma("GCC diagnostic ignored \"-Wtype-limits\"");                     \
-		assert(__tmp >= lower);                                                  \
-		assert(__tmp <= upper);                                                  \
+		assert(__assert_in_range_tmp >= lower);                                  \
+		assert(__assert_in_range_tmp <= upper);                                  \
 		_Pragma("GCC diagnostic pop");                                           \
 	} while (0)
 
@@ -113,11 +113,26 @@ safe_isnan(double a) {
 #define to_u32_checked(val)                                                              \
 	({                                                                               \
 		auto __to_tmp = (val);                                                   \
-		int64_t max attr_unused = UINT32_MAX; /* silence clang tautological      \
-		                                         comparison warning*/            \
-		ASSERT_IN_RANGE(__to_tmp, 0, max);                                       \
+		int64_t __to_u32_max attr_unused = UINT32_MAX; /* silence clang          \
+		                                                  tautological           \
+		                                                  comparison warning */  \
+		ASSERT_IN_RANGE(__to_tmp, 0, __to_u32_max);                              \
 		(uint32_t) __to_tmp;                                                     \
 	})
+
+/**
+ * container_of - cast a member of a structure out to the containing structure
+ * @ptr:	the pointer to the member.
+ * @type:	the type of the container struct this is embedded in.
+ * @member:	the name of the member within the struct.
+ *
+ */
+#define container_of(ptr, type, member)                                                  \
+	({                                                                               \
+		const __typeof__(((type *)0)->member) *__mptr = (ptr);                   \
+		(type *)((char *)__mptr - offsetof(type, member));                       \
+	})
+
 /**
  * Normalize an int value to a specific range.
  *
@@ -126,11 +141,13 @@ safe_isnan(double a) {
  * @param max maximum value
  * @return normalized value
  */
-static inline int attr_const normalize_i_range(int i, int min, int max) {
-	if (i > max)
+static inline int attr_const attr_unused normalize_i_range(int i, int min, int max) {
+	if (i > max) {
 		return max;
-	if (i < min)
+	}
+	if (i < min) {
 		return min;
+	}
 	return i;
 }
 
@@ -147,6 +164,12 @@ static inline int attr_const lerp_range(int a, int b, int c, int d, int value) {
 	return (d-c)*(value-a)/(b-a) + c;
 }
 
+/// Generic integer abs()
+#define iabs(val)                                                                        \
+	({                                                                               \
+		__auto_type __tmp = (val);                                               \
+		__tmp > 0 ? __tmp : -__tmp;                                              \
+	})
 #define min2(a, b) ((a) > (b) ? (b) : (a))
 #define max2(a, b) ((a) > (b) ? (a) : (b))
 #define min3(a, b, c) min2(a, min2(b, c))
@@ -163,10 +186,12 @@ static inline int attr_const lerp_range(int a, int b, int c, int d, int value) {
  * @return normalized value
  */
 static inline double attr_const normalize_d_range(double d, double min, double max) {
-	if (d > max)
+	if (d > max) {
 		return max;
-	if (d < min)
+	}
+	if (d < min) {
 		return min;
+	}
 	return d;
 }
 
@@ -176,7 +201,7 @@ static inline double attr_const normalize_d_range(double d, double min, double m
  * @param d double value to normalize
  * @return normalized value
  */
-static inline double attr_const normalize_d(double d) {
+static inline double attr_const attr_unused normalize_d(double d) {
 	return normalize_d_range(d, 0.0, 1.0);
 }
 
@@ -226,7 +251,7 @@ allocchk_(const char *func_name, const char *file, unsigned int line, void *ptr)
 		((type *)allocchk(calloc((size_t)tmp, sizeof(type))));                   \
 	})
 
-/// @brief Wrapper of ealloc().
+/// @brief Wrapper of realloc().
 #define crealloc(ptr, nmemb)                                                               \
 	({                                                                                 \
 		auto tmp = (nmemb);                                                        \

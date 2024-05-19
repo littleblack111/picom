@@ -19,6 +19,16 @@ void apply_driver_workarounds(struct session *ps, enum driver driver) {
 	}
 }
 
+enum vblank_scheduler_type choose_vblank_scheduler(enum driver driver attr_unused) {
+	enum vblank_scheduler_type type = VBLANK_SCHEDULER_PRESENT;
+#ifdef CONFIG_OPENGL
+	if (driver & DRIVER_NVIDIA) {
+		type = VBLANK_SCHEDULER_SGI_VIDEO_SYNC;
+	}
+#endif
+	return type;
+}
+
 enum driver detect_driver(xcb_connection_t *c, backend_t *backend_data, xcb_window_t window) {
 	enum driver ret = 0;
 	// First we try doing backend agnostic detection using RANDR

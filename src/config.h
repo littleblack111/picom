@@ -93,6 +93,27 @@ enum blur_method {
 
 typedef struct _c2_lptr c2_lptr_t;
 
+enum vblank_scheduler_type {
+	/// X Present extension based vblank events
+	VBLANK_SCHEDULER_PRESENT,
+	/// GLX_SGI_video_sync based vblank events
+	VBLANK_SCHEDULER_SGI_VIDEO_SYNC,
+	/// An invalid scheduler, served as a scheduler count, and
+	/// as a sentinel value.
+	LAST_VBLANK_SCHEDULER,
+};
+
+extern const char *vblank_scheduler_str[];
+
+/// Internal, private options for debugging and development use.
+struct debug_options {
+	/// Try to reduce frame latency by using vblank interval and render time
+	/// estimates. Right now it's not working well across drivers.
+	int smart_frame_pacing;
+	/// Override the vblank scheduler chosen by the compositor.
+	int force_vblank_scheduler;
+};
+
 /// Structure representing all options.
 typedef struct options {
 	// === Debugging ===
@@ -316,6 +337,8 @@ typedef struct options {
 	c2_lptr_t *transparent_clipping_blacklist;
 
 	bool dithered_present;
+
+	struct debug_options debug_options;
 } options_t;
 
 extern const char *const BACKEND_STRS[NUM_BKEND + 1];
@@ -343,7 +366,7 @@ char **xdg_config_dirs(void);
 /// Parse a configuration file
 /// Returns the actually config_file name used, allocated on heap
 /// Outputs:
-///   shadow_enable = whether shaodw is enabled globally
+///   shadow_enable = whether shadow is enabled globally
 ///   fading_enable = whether fading is enabled globally
 ///   win_option_mask = whether option overrides for specific window type is set for given
 ///                     options

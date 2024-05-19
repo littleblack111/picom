@@ -233,14 +233,16 @@ static inline long winprop_get_int(winprop_t prop, size_t index) {
  */
 static inline int strcmp_wd(const char *needle, const char *src) {
 	int ret = mstrncmp(needle, src);
-	if (ret)
+	if (ret) {
 		return ret;
+	}
 
 	char c = src[strlen(needle)];
-	if (isalnum((unsigned char)c) || '_' == c)
+	if (isalnum((unsigned char)c) || '_' == c) {
 		return 1;
-	else
-		return 0;
+	}
+
+	return 0;
 }
 
 /**
@@ -254,8 +256,9 @@ static inline attr_unused bool c2_ptr_isempty(const c2_ptr_t p) {
  * Reset a c2_ptr_t.
  */
 static inline void c2_ptr_reset(c2_ptr_t *pp) {
-	if (pp)
+	if (pp) {
 		memcpy(pp, &C2_PTR_NULL, sizeof(c2_ptr_t));
+	}
 }
 
 /**
@@ -988,7 +991,7 @@ static int c2_parse_legacy(const char *pattern, int offset, c2_ptr_t *presult) {
 
 	// Determine the pattern target
 #define TGTFILL(pdefid)                                                                  \
-	(pleaf->predef = pdefid, pleaf->type = C2_PREDEFS[pdefid].type,                  \
+	(pleaf->predef = (pdefid), pleaf->type = C2_PREDEFS[pdefid].type,                \
 	 pleaf->format = C2_PREDEFS[pdefid].format)
 	switch (pattern[offset]) {
 	case 'n': TGTFILL(C2_L_PNAME); break;
@@ -1044,7 +1047,7 @@ static bool c2_l_postprocess(session_t *ps, c2_l_t *pleaf) {
 
 	// Get target atom if it's not a predefined one
 	if (pleaf->predef == C2_L_PUNDEFINED) {
-		pleaf->tgtatom = get_atom(ps->atoms, pleaf->tgt);
+		pleaf->tgtatom = get_atom(ps->atoms, pleaf->tgt, ps->c.c);
 		if (!pleaf->tgtatom) {
 			log_error("Failed to get atom for target \"%s\".", pleaf->tgt);
 			return false;
@@ -1333,7 +1336,7 @@ static xcb_atom_t c2_get_atom_type(const c2_l_t *pleaf) {
 	case C2_L_TDRAWABLE: return XCB_ATOM_DRAWABLE;
 	default: assert(0); break;
 	}
-	unreachable;
+	unreachable();
 }
 
 /**
@@ -1377,14 +1380,10 @@ static inline void c2_match_once_leaf(session_t *ps, const struct managed_win *w
 			case C2_L_PWIDTHB: predef_target = w->widthb; break;
 			case C2_L_PHEIGHTB: predef_target = w->heightb; break;
 			case C2_L_PBDW: predef_target = w->g.border_width; break;
-			case C2_L_PFULLSCREEN:
-				predef_target = win_is_fullscreen(ps, w);
-				break;
+			case C2_L_PFULLSCREEN: predef_target = w->is_fullscreen; break;
 			case C2_L_POVREDIR: predef_target = w->a.override_redirect; break;
 			case C2_L_PARGB: predef_target = win_has_alpha(w); break;
-			case C2_L_PFOCUSED:
-				predef_target = win_is_focused_raw(ps, w);
-				break;
+			case C2_L_PFOCUSED: predef_target = win_is_focused_raw(w); break;
 			case C2_L_PWMWIN: predef_target = w->wmwin; break;
 			case C2_L_PBSHAPED: predef_target = w->bounding_shaped; break;
 			case C2_L_PROUNDED: predef_target = w->rounded_corners; break;
@@ -1510,7 +1509,8 @@ static inline void c2_match_once_leaf(session_t *ps, const struct managed_win *w
 		else {
 			char **strlst = NULL;
 			int nstr = 0;
-			if (wid_get_text_prop(ps, wid, pleaf->tgtatom, &strlst, &nstr)) {
+			if (wid_get_text_prop(&ps->c, ps->atoms, wid, pleaf->tgtatom,
+			                      &strlst, &nstr)) {
 				if (pleaf->index < 0 && nstr > 0 && strlen(strlst[0]) > 0) {
 					ntargets = to_u32_checked(nstr);
 					targets = (const char **)strlst;

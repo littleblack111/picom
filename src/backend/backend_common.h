@@ -54,19 +54,11 @@ solid_picture(struct x_connection *, bool argb, double a, double r, double g, do
 xcb_image_t *make_shadow(struct x_connection *c, const conv *kernel, double opacity,
                          int width, int height);
 
-/// The default implementation of `is_win_transparent`, it simply looks at win::mode. So
-/// this is not suitable for backends that alter the content of windows
-bool default_is_win_transparent(void *, win *, void *);
-
-/// The default implementation of `is_frame_transparent`, it uses win::frame_opacity. Same
-/// caveat as `default_is_win_transparent` applies.
-bool default_is_frame_transparent(void *, win *, void *);
-
-void *default_backend_render_shadow(backend_t *backend_data, int width, int height,
-                                    struct backend_shadow_context *sctx, struct color color);
+image_handle default_render_shadow(backend_t *backend_data, int width, int height,
+                                   struct backend_shadow_context *sctx, struct color color);
 
 /// Implement `render_shadow` with `shadow_from_mask`.
-void *
+image_handle
 backend_render_shadow_from_mask(backend_t *backend_data, int width, int height,
                                 struct backend_shadow_context *sctx, struct color color);
 struct backend_shadow_context *
@@ -80,8 +72,8 @@ void init_backend_base(struct backend_base *base, session_t *ps);
 struct conv **generate_blur_kernel(enum blur_method method, void *args, int *kernel_count);
 struct dual_kawase_params *generate_dual_kawase_params(void *args);
 
-void *default_clone_image(backend_t *base, const void *image_data, const region_t *reg);
-bool default_is_image_transparent(backend_t *base attr_unused, void *image_data);
+image_handle default_clone_image(backend_t *base, image_handle image, const region_t *reg);
+bool default_is_image_transparent(backend_t *base attr_unused, image_handle image);
 bool default_set_image_property(backend_t *base attr_unused, enum image_properties op,
-                                void *image_data, void *arg);
+                                image_handle image, void *arg);
 struct backend_image *default_new_backend_image(int w, int h);

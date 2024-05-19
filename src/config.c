@@ -8,6 +8,8 @@
 #include <limits.h>
 #include <math.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -41,10 +43,7 @@ const char *xdg_config_home(void) {
 			return NULL;
 		}
 
-		xdgh = cvalloc(strlen(home) + strlen(default_dir) + 1);
-
-		strcpy(xdgh, home);
-		strcat(xdgh, default_dir);
+		xdgh = mstrjoin(home, default_dir);
 	} else {
 		xdgh = strdup(xdgh);
 	}
@@ -183,20 +182,19 @@ const char *parse_readnum(const char *src, double *dest) {
 }
 
 enum blur_method parse_blur_method(const char *src) {
+	if (strcmp(src, "box") == 0) {
+		return BLUR_METHOD_BOX;
+	}
+	if (strcmp(src, "dual_kawase") == 0) {
+		return BLUR_METHOD_DUAL_KAWASE;
+	}
+	if (strcmp(src, "gaussian") == 0) {
+		return BLUR_METHOD_GAUSSIAN;
+	}
 	if (strcmp(src, "kernel") == 0) {
 		return BLUR_METHOD_KERNEL;
-	} else if (strcmp(src, "box") == 0) {
-		return BLUR_METHOD_BOX;
-	} else if (strcmp(src, "gaussian") == 0) {
-		return BLUR_METHOD_GAUSSIAN;
-	} else if (strcmp(src, "dual_kawase") == 0) {
-		return BLUR_METHOD_DUAL_KAWASE;
-	} else if (strcmp(src, "kawase") == 0) {
-		log_warn("Blur method 'kawase' has been renamed to 'dual_kawase'. "
-		         "Interpreted as 'dual_kawase', but this will stop working "
-		         "soon.");
-		return BLUR_METHOD_DUAL_KAWASE;
-	} else if (strcmp(src, "none") == 0) {
+	}
+	if (strcmp(src, "none") == 0) {
 		return BLUR_METHOD_NONE;
 	}
 	return BLUR_METHOD_INVALID;
@@ -562,7 +560,7 @@ static char *locate_auxiliary_file_at(const char *base, const char *scope, const
 }
 
 /**
- * Get a path of an auxiliary file to read, could be a shader file, or any supplimenrary
+ * Get a path of an auxiliary file to read, could be a shader file, or any supplementary
  * file.
  *
  * Follows the XDG specification to search for the shader file in configuration locations.
@@ -597,15 +595,17 @@ char *locate_auxiliary_file(const char *scope, const char *path, const char *inc
 	// Fall back to searching in user config directory
 	scoped_charp picom_scope = mstrjoin("/picom/", scope);
 	scoped_charp config_home = (char *)xdg_config_home();
-	char *ret = locate_auxiliary_file_at(config_home, picom_scope, path);
-	if (ret) {
-		return ret;
+	if (config_home) {
+		char *ret = locate_auxiliary_file_at(config_home, picom_scope, path);
+		if (ret) {
+			return ret;
+		}
 	}
 
 	// Fall back to searching in system config directory
 	auto config_dirs = xdg_config_dirs();
 	for (int i = 0; config_dirs[i]; i++) {
-		ret = locate_auxiliary_file_at(config_dirs[i], picom_scope, path);
+		char *ret = locate_auxiliary_file_at(config_dirs[i], picom_scope, path);
 		if (ret) {
 			free(config_dirs);
 			return ret;
@@ -613,7 +613,83 @@ char *locate_auxiliary_file(const char *scope, const char *path, const char *inc
 	}
 	free(config_dirs);
 
-	return ret;
+	return NULL;
+}
+
+struct debug_options_entry {
+	const char *name;
+	const char **choices;
+	size_t offset;
+};
+
+// clang-format off
+const char *vblank_scheduler_str[] = {
+	[VBLANK_SCHEDULER_PRESENT] = "present",
+	[VBLANK_SCHEDULER_SGI_VIDEO_SYNC] = "sgi_video_sync",
+	[LAST_VBLANK_SCHEDULER] = NULL
+};
+static const struct debug_options_entry debug_options_entries[] = {
+    {"smart_frame_pacing", NULL,                 offsetof(struct debug_options, smart_frame_pacing)},
+    {"force_vblank_sched", vblank_scheduler_str, offsetof(struct debug_options, force_vblank_scheduler)},
+};
+// clang-format on
+
+void parse_debug_option_single(char *setting, struct debug_options *debug_options) {
+	char *equal = strchr(setting, '=');
+	size_t name_len = equal ? (size_t)(equal - setting) : strlen(setting);
+	for (size_t i = 0; i < ARR_SIZE(debug_options_entries); i++) {
+		if (strncmp(setting, debug_options_entries[i].name, name_len) != 0) {
+			continue;
+		}
+		if (debug_options_entries[i].name[name_len] != '\0') {
+			continue;
+		}
+		auto value = (int *)((void *)debug_options + debug_options_entries[i].offset);
+		if (equal) {
+			const char *const arg = equal + 1;
+			if (debug_options_entries[i].choices != NULL) {
+				for (size_t j = 0; debug_options_entries[i].choices[j]; j++) {
+					if (strcmp(arg, debug_options_entries[i].choices[j]) ==
+					    0) {
+						*value = (int)j;
+						return;
+					}
+				}
+			}
+			if (!parse_int(arg, value)) {
+				log_error("Invalid value for debug option %s: %s, it "
+				          "will be ignored.",
+				          debug_options_entries[i].name, arg);
+			}
+		} else if (debug_options_entries[i].choices == NULL) {
+			*value = 1;
+		} else {
+			log_error(
+			    "Missing value for debug option %s, it will be ignored.", setting);
+		}
+		return;
+	}
+	log_error("Invalid debug option: %s", setting);
+}
+
+/// Parse debug options from environment variable `PICOM_DEBUG`.
+void parse_debug_options(struct debug_options *debug_options) {
+	const char *debug = getenv("PICOM_DEBUG");
+	const struct debug_options default_debug_options = {
+	    .force_vblank_scheduler = LAST_VBLANK_SCHEDULER,
+	};
+
+	*debug_options = default_debug_options;
+	if (!debug) {
+		return;
+	}
+
+	scoped_charp debug_copy = strdup(debug);
+	char *tmp, *needle = strtok_r(debug_copy, ";", &tmp);
+	while (needle) {
+		parse_debug_option_single(needle, debug_options);
+		needle = strtok_r(NULL, ";", &tmp);
+	}
 }
 
 /**
@@ -869,5 +945,6 @@ char *parse_config(options_t *opt, const char *config_file, bool *shadow_enable,
 	(void)hasneg;
 	(void)winopt_mask;
 #endif
+	parse_debug_options(&opt->debug_options);
 	return ret;
 }
