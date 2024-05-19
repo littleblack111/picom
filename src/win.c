@@ -194,14 +194,6 @@ static inline bool is_transient(session_t *ps, const struct managed_win *w) {
 		 && wid_has_prop(ps, w->client_win, ps->atoms->aWM_TRANSIENT_FOR));
 }
 
-static inline bool is_transient(session_t *ps, const struct managed_win *w) {
-	return
-		(w->window_type < WINTYPE_NORMAL || w->window_type > WINTYPE_NORMAL)
-		||
-		((w->window_type != WINTYPE_TOOLTIP)
-		 && wid_has_prop(ps, w->client_win, ps->atoms->aWM_TRANSIENT_FOR));
-}
-
 static inline const char *win_get_name_if_managed(const struct win *w) {
 	if (!w->managed) {
 		return "(unmanaged)";
