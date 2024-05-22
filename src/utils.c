@@ -30,7 +30,7 @@ void report_allocation_failure(const char *func, const char *file, unsigned int 
 	ssize_t _ attr_unused = writev(STDERR_FILENO, v, ARR_SIZE(v));
 	abort();
 
-	unreachable();
+	unreachable;
 }
 
 ///
@@ -141,10 +141,10 @@ void rolling_max_pop_front(struct rolling_max *rm, int front) {
 }
 
 void rolling_max_push_back(struct rolling_max *rm, int val) {
-	// Update the priority queue.
+	// Update the prority queue.
 	// Remove all elements smaller than the new element from the queue. Because
 	// the new element will become the maximum element before them, and since they
-	// come before the new element, they will have been popped before the new
+	// come b1efore the new element, they will have been popped before the new
 	// element, so they will never become the maximum element.
 	while (rm->np) {
 		int p_tail = IDX(rm->p_head + rm->np - 1);

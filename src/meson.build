@@ -9,8 +9,7 @@ base_deps = [
 
 srcs = [ files('picom.c', 'win.c', 'c2.c', 'x.c', 'config.c', 'vsync.c', 'utils.c',
                'diagnostic.c', 'string_utils.c', 'render.c', 'kernel.c', 'log.c',
-               'options.c', 'event.c', 'cache.c', 'atom.c', 'file_watch.c', 'statistics.c',
-               'vblank.c') ]
+               'options.c', 'event.c', 'cache.c', 'atom.c', 'file_watch.c', 'statistics.c') ]
 picom_inc = include_directories('.')
 
 cflags = []
@@ -23,7 +22,7 @@ required_xcb_packages = [
 # Some XCB packages are here because their versioning differs (see check below).
 required_packages = [
 	'pixman-1', 'x11', 'x11-xcb', 'xcb-image', 'xcb-renderutil', 'xcb-util',
-	'xext', 'threads',
+	'xext'
 ]
 
 foreach i : required_packages
@@ -58,8 +57,8 @@ if get_option('vsync_drm')
 endif
 
 if get_option('opengl')
-	cflags += ['-DCONFIG_OPENGL']
-	deps += [dependency('epoxy', required: true)]
+	cflags += ['-DCONFIG_OPENGL', '-DGL_GLEXT_PROTOTYPES']
+	deps += [dependency('gl', required: true), dependency('egl', required: true)]
 	srcs += [ 'opengl.c' ]
 endif
 

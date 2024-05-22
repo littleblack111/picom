@@ -6,7 +6,6 @@
 #include <xcb/composite.h>
 #include <xcb/render.h>
 #include <xcb/sync.h>
-#include <xcb/xcb_aux.h>
 #include <xcb/xcb_image.h>
 #include <xcb/xcb_renderutil.h>
 
@@ -56,20 +55,19 @@ static inline bool paint_bind_tex(session_t *ps, paint_t *ppaint, int wid, int h
 	struct glx_fbconfig_info *fbcfg;
 	if (!visual) {
 		assert(depth == 32);
-		if (!ps->argb_fbconfig.cfg) {
-			glx_find_fbconfig(&ps->c,
-			                  (struct xvisual_info){.red_size = 8,
-			                                        .green_size = 8,
-			                                        .blue_size = 8,
-			                                        .alpha_size = 8,
-			                                        .visual_depth = 32},
-			                  &ps->argb_fbconfig);
+		if (!ps->argb_fbconfig) {
+			ps->argb_fbconfig = glx_find_fbconfig(
+			    &ps->c, (struct xvisual_info){.red_size = 8,
+			                                  .green_size = 8,
+			                                  .blue_size = 8,
+			                                  .alpha_size = 8,
+			                                  .visual_depth = 32});
 		}
-		if (!ps->argb_fbconfig.cfg) {
+		if (!ps->argb_fbconfig) {
 			log_error("Failed to find appropriate FBConfig for 32 bit depth");
 			return false;
 		}
-		fbcfg = &ps->argb_fbconfig;
+		fbcfg = ps->argb_fbconfig;
 	} else {
 		auto m = x_get_visual_info(&ps->c, visual);
 		if (m.visual_depth < 0) {
@@ -81,17 +79,17 @@ static inline bool paint_bind_tex(session_t *ps, paint_t *ppaint, int wid, int h
 			return false;
 		}
 
-		if (!ppaint->fbcfg.cfg) {
-			glx_find_fbconfig(&ps->c, m, &ppaint->fbcfg);
+		if (!ppaint->fbcfg) {
+			ppaint->fbcfg = glx_find_fbconfig(&ps->c, m);
 		}
-		if (!ppaint->fbcfg.cfg) {
+		if (!ppaint->fbcfg) {
 			log_error("Failed to find appropriate FBConfig for X pixmap");
 			return false;
 		}
-		fbcfg = &ppaint->fbcfg;
+		fbcfg = ppaint->fbcfg;
 	}
 
-	if (force || !glx_tex_bound(ppaint->ptex, ppaint->pixmap)) {
+	if (force || !glx_tex_binded(ppaint->ptex, ppaint->pixmap)) {
 		return glx_bind_pixmap(ps, &ppaint->ptex, ppaint->pixmap, wid, hei,
 		                       repeat, fbcfg);
 	}
@@ -380,7 +378,7 @@ static inline bool paint_isvalid(session_t *ps, const paint_t *ppaint) {
 	}
 
 #ifdef CONFIG_OPENGL
-	if (BKEND_GLX == ps->o.backend && !glx_tex_bound(ppaint->ptex, XCB_NONE)) {
+	if (BKEND_GLX == ps->o.backend && !glx_tex_binded(ppaint->ptex, XCB_NONE)) {
 		return false;
 	}
 #endif
@@ -476,10 +474,10 @@ void paint_one(session_t *ps, struct managed_win *w, const region_t *reg_paint) 
 	} else {
 		// Painting parameters
 		const margin_t extents = win_calc_frame_extents(w);
-		auto const t = extents.top;
-		auto const l = extents.left;
-		auto const b = extents.bottom;
-		auto const r = extents.right;
+		const auto t = extents.top;
+		const auto l = extents.left;
+		const auto b = extents.bottom;
+		const auto r = extents.right;
 
 #define COMP_BDR(cx, cy, cwid, chei)                                                     \
 	paint_region(ps, w, (cx), (cy), (cwid), (chei), w->frame_opacity * w->opacity,   \
@@ -606,27 +604,20 @@ static bool get_root_tile(session_t *ps) {
 	bool fill = false;
 	xcb_pixmap_t pixmap = x_get_root_back_pixmap(&ps->c, ps->atoms);
 
-	xcb_get_geometry_reply_t *r;
-	if (pixmap) {
-		r = xcb_get_geometry_reply(ps->c.c, xcb_get_geometry(ps->c.c, pixmap), NULL);
+	// Make sure the pixmap we got is valid
+	if (pixmap && !x_validate_pixmap(&ps->c, pixmap)) {
+		pixmap = XCB_NONE;
 	}
 
 	// Create a pixmap if there isn't any
-	xcb_visualid_t visual;
-	if (!pixmap || !r) {
+	if (!pixmap) {
 		pixmap =
 		    x_create_pixmap(&ps->c, (uint8_t)ps->c.screen_info->root_depth, 1, 1);
 		if (pixmap == XCB_NONE) {
 			log_error("Failed to create pixmaps for root tile.");
 			return false;
 		}
-		visual = ps->c.screen_info->root_visual;
 		fill = true;
-	} else {
-		visual = r->depth == ps->c.screen_info->root_depth
-		             ? ps->c.screen_info->root_visual
-		             : x_get_visual_for_depth(ps->c.screen_info, r->depth);
-		free(r);
 	}
 
 	// Create Picture
@@ -634,7 +625,7 @@ static bool get_root_tile(session_t *ps) {
 	    .repeat = true,
 	};
 	ps->root_tile_paint.pict = x_create_picture_with_visual_and_pixmap(
-	    &ps->c, visual, pixmap, XCB_RENDER_CP_REPEAT, &pa);
+	    &ps->c, ps->c.screen_info->root_visual, pixmap, XCB_RENDER_CP_REPEAT, &pa);
 
 	// Fill pixmap if needed
 	if (fill) {
@@ -655,7 +646,8 @@ static bool get_root_tile(session_t *ps) {
 	ps->root_tile_paint.pixmap = pixmap;
 #ifdef CONFIG_OPENGL
 	if (BKEND_GLX == ps->o.backend) {
-		return paint_bind_tex(ps, &ps->root_tile_paint, 0, 0, true, 0, visual, false);
+		return paint_bind_tex(ps, &ps->root_tile_paint, 0, 0, true, 0,
+		                      ps->c.screen_info->root_visual, false);
 	}
 #endif
 
@@ -896,8 +888,8 @@ win_blur_background(session_t *ps, struct managed_win *w, xcb_render_picture_t t
                     const region_t *reg_paint) {
 	const int16_t x = w->g.x;
 	const int16_t y = w->g.y;
-	auto const wid = to_u16_checked(w->widthb);
-	auto const hei = to_u16_checked(w->heightb);
+	const auto wid = to_u16_checked(w->widthb);
+	const auto hei = to_u16_checked(w->heightb);
 	const int cr = w ? w->corner_radius : 0;
 
 	double factor_center = 1.0;
@@ -1182,8 +1174,8 @@ void paint_all(session_t *ps, struct managed_win *t) {
 			if (w->corner_radius > 0 && ps->o.backend == BKEND_GLX) {
 				const int16_t x = w->g.x;
 				const int16_t y = w->g.y;
-				auto const wid = to_u16_checked(w->widthb);
-				auto const hei = to_u16_checked(w->heightb);
+				const auto wid = to_u16_checked(w->widthb);
+				const auto hei = to_u16_checked(w->heightb);
 				glx_bind_texture(ps, &w->glx_texture_bg, x, y, wid, hei);
 			}
 #endif
@@ -1203,8 +1195,8 @@ void paint_all(session_t *ps, struct managed_win *t) {
 			// Rounded corners for XRender is implemented inside render()
 			// Round window corners
 			if (w->corner_radius > 0 && ps->o.backend == BKEND_GLX) {
-				auto const wid = to_u16_checked(w->widthb);
-				auto const hei = to_u16_checked(w->heightb);
+				const auto wid = to_u16_checked(w->widthb);
+				const auto hei = to_u16_checked(w->heightb);
 				glx_round_corners_dst(ps, w, w->glx_texture_bg, w->g.x,
 				                      w->g.y, wid, hei,
 				                      (float)ps->psglx->z - 0.5F,
@@ -1231,7 +1223,7 @@ void paint_all(session_t *ps, struct managed_win *t) {
 	if (ps->o.vsync) {
 		// Make sure all previous requests are processed to achieve best
 		// effect
-		xcb_aux_sync(ps->c.c);
+		x_sync(&ps->c);
 #ifdef CONFIG_OPENGL
 		if (glx_has_context(ps)) {
 			if (ps->o.vsync_use_glfinish) {
@@ -1290,7 +1282,7 @@ void paint_all(session_t *ps, struct managed_win *t) {
 		break;
 #ifdef CONFIG_OPENGL
 	case BKEND_XR_GLX_HYBRID:
-		xcb_aux_sync(ps->c.c);
+		x_sync(&ps->c);
 		if (ps->o.vsync_use_glfinish) {
 			glFinish();
 		} else {
@@ -1315,7 +1307,7 @@ void paint_all(session_t *ps, struct managed_win *t) {
 	default: assert(0);
 	}
 
-	xcb_aux_sync(ps->c.c);
+	x_sync(&ps->c);
 
 #ifdef CONFIG_OPENGL
 	if (glx_has_context(ps)) {
@@ -1530,7 +1522,7 @@ void deinit_render(session_t *ps) {
 	free_root_tile(ps);
 
 #ifdef CONFIG_OPENGL
-	ps->root_tile_paint.fbcfg = (struct glx_fbconfig_info){0};
+	free(ps->root_tile_paint.fbcfg);
 	if (bkend_use_glx(ps)) {
 		glx_destroy(ps);
 	}

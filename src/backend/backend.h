@@ -115,15 +115,15 @@ struct dual_kawase_blur_args {
 	int strength;
 };
 
-typedef struct {
-	// Intentionally left blank
-} *image_handle;
-
 struct backend_operations {
 	// ===========    Initialization    ===========
 
 	/// Initialize the backend, prepare for rendering to the target window.
-	backend_t *(*init)(session_t *, xcb_window_t)attr_nonnull(1);
+	/// Here is how you should choose target window:
+	///    1) if ps->overlay is not XCB_NONE, use that
+	///    2) use ps->root otherwise
+	// TODO(yshui) make the target window a parameter
+	backend_t *(*init)(session_t *)attr_nonnull(1);
 	void (*deinit)(backend_t *backend_data) attr_nonnull(1);
 
 	/// Called when rendering will be stopped for an unknown amount of
@@ -171,27 +171,31 @@ struct backend_operations {
 	 * Paint the content of an image onto the rendering buffer.
 	 *
 	 * @param backend_data the backend data
-	 * @param image        the image to paint, cannot be NULL
+	 * @param image_data   the image to paint
 	 * @param dst_x, dst_y the top left corner of the image in the target
 	 * @param mask         the mask image, the top left of the mask is aligned with
-	 *                     the top left of the image. Optional, can be
-	 *                     NULL.
+	 *                     the top left of the image
 	 * @param reg_paint    the clip region, in target coordinates
 	 * @param reg_visible  the visible region, in target coordinates
 	 */
-	void (*compose)(backend_t *backend_data, image_handle image, coord_t image_dst,
-	                image_handle mask, coord_t mask_dst, const region_t *reg_paint,
-	                const region_t *reg_visible, bool lerp) attr_nonnull(1, 2, 6, 7);
+	void (*compose)(backend_t *backend_data, void *image_data, coord_t image_dst,
+	                void *mask, coord_t mask_dst, const region_t *reg_paint,
+	                const region_t *reg_visible, bool lerp);
+
+    void (*_compose)(backend_t *backend_data, void *image_data,
+                int dst_x1, int dst_y1, int dst_x2, int dst_y2,
+                const region_t *reg_paint, const region_t *reg_visible);
+
 
 	/// Fill rectangle of the rendering buffer, mostly for debug purposes, optional.
 	void (*fill)(backend_t *backend_data, struct color, const region_t *clip);
 
 	/// Blur a given region of the rendering buffer.
 	///
-	/// The blur can be limited by `mask`. `mask_dst` specifies the top left corner of
-	/// the mask. `mask` can be NULL.
-	bool (*blur)(backend_t *backend_data, double opacity, void *blur_ctx,
-	             image_handle mask, coord_t mask_dst, const region_t *reg_blur,
+	/// The blur is limited by `mask`. `mask_dst` specifies the top left corner of the
+	/// mask is.
+	bool (*blur)(backend_t *backend_data, double opacity, void *blur_ctx, void *mask,
+	             coord_t mask_dst, const region_t *reg_blur,
 	             const region_t *reg_visible) attr_nonnull(1, 3, 6, 7);
 
 	/// Update part of the back buffer with the rendering buffer, then present the
@@ -207,47 +211,39 @@ struct backend_operations {
 	 * Bind a X pixmap to the backend's internal image data structure.
 	 *
 	 * @param backend_data backend data
-	 * @param pixmap       X pixmap to bind
-	 * @param fmt          information of the pixmap's visual
-	 * @param owned        whether the ownership of the pixmap is transferred to the
-	 *                     backend.
-	 * @return             backend specific image handle for the pixmap. May be
-	 *                     NULL.
+	 * @param pixmap X pixmap to bind
+	 * @param fmt information of the pixmap's visual
+	 * @param owned whether the ownership of the pixmap is transfered to the backend
+	 * @return backend internal data structure bound with this pixmap
 	 */
-	image_handle (*bind_pixmap)(backend_t *backend_data, xcb_pixmap_t pixmap,
-	                            struct xvisual_info fmt, bool owned);
+	void *(*bind_pixmap)(backend_t *backend_data, xcb_pixmap_t pixmap,
+	                     struct xvisual_info fmt, bool owned);
 
 	/// Create a shadow context for rendering shadows with radius `radius`.
-	/// Default implementation: default_create_shadow_context
+	/// Default implementation: default_backend_create_shadow_context
 	struct backend_shadow_context *(*create_shadow_context)(backend_t *backend_data,
 	                                                        double radius);
 	/// Destroy a shadow context
-	/// Default implementation: default_destroy_shadow_context
+	/// Default implementation: default_backend_destroy_shadow_context
 	void (*destroy_shadow_context)(backend_t *backend_data,
 	                               struct backend_shadow_context *ctx);
 
 	/// Create a shadow image based on the parameters. Resulting image should have a
-	/// size of `width + radius * 2` x `height + radius * 2`. Radius is set when the
+	/// size of `width + radisu * 2` x `height + radius * 2`. Radius is set when the
 	/// shadow context is created.
-	/// Default implementation: default_render_shadow
-	///
-	/// @return the shadow image, may be NULL.
+	/// Default implementation: default_backend_render_shadow
 	///
 	/// Required.
-	image_handle (*render_shadow)(backend_t *backend_data, int width, int height,
-	                              struct backend_shadow_context *ctx, struct color color);
+	void *(*render_shadow)(backend_t *backend_data, int width, int height,
+	                       struct backend_shadow_context *ctx, struct color color);
 
 	/// Create a shadow by blurring a mask. `size` is the size of the blur. The
 	/// backend can use whichever blur method is the fastest. The shadow produced
 	/// shoule be consistent with `render_shadow`.
 	///
-	/// @param mask the input mask, must not be NULL.
-	/// @return the shadow image, may be NULL.
-	///
 	/// Optional.
-	image_handle (*shadow_from_mask)(backend_t *backend_data, image_handle mask,
-	                                 struct backend_shadow_context *ctx,
-	                                 struct color color);
+	void *(*shadow_from_mask)(backend_t *backend_data, void *mask,
+	                          struct backend_shadow_context *ctx, struct color color);
 
 	/// Create a mask image from region `reg`. This region can be used to create
 	/// shadow, or used as a mask for composing. When used as a mask, it should mask
@@ -258,18 +254,13 @@ struct backend_operations {
 	/// and outside of the mask. Corner radius should exclude the corners from the
 	/// mask. Corner radius should be applied before the inversion.
 	///
-	/// @return the mask image, may be NULL.
-	///
 	/// Required.
-	image_handle (*make_mask)(backend_t *backend_data, geometry_t size,
-	                          const region_t *reg);
+	void *(*make_mask)(backend_t *backend_data, geometry_t size, const region_t *reg);
 
 	// ============ Resource management ===========
 
 	/// Free resources associated with an image data structure
-	///
-	/// @param image the image to be released, cannot be NULL.
-	void (*release_image)(backend_t *backend_data, image_handle image) attr_nonnull(1, 2);
+	void (*release_image)(backend_t *backend_data, void *img_data) attr_nonnull(1, 2);
 
 	/// Create a shader object from a shader source.
 	///
@@ -294,14 +285,12 @@ struct backend_operations {
 	/// This function is needed because some backend might change the content of the
 	/// window (e.g. when using a custom shader with the glx backend), so only the
 	/// backend knows if an image is transparent.
-	///
-	/// @param image the image to be checked, must not be NULL.
-	bool (*is_image_transparent)(backend_t *backend_data, image_handle image)
+	bool (*is_image_transparent)(backend_t *backend_data, void *image_data)
 	    attr_nonnull(1, 2);
 
-	/// Get the age of the buffer content we are currently rendering on top
+	/// Get the age of the buffer content we are currently rendering ontop
 	/// of. The buffer that has just been `present`ed has a buffer age of 1.
-	/// Every time `present` is called, buffers get older. Return -1 if the
+	/// Everytime `present` is called, buffers get older. Return -1 if the
 	/// buffer is empty.
 	///
 	/// Optional
@@ -310,7 +299,7 @@ struct backend_operations {
 	/// Get the render time of the last frame. If the render is still in progress,
 	/// returns false. The time is returned in `ts`. Frames are delimited by the
 	/// present() calls. i.e. after a present() call, last_render_time() should start
-	/// reporting the time of the just presented frame.
+	/// reporting the time of the just presen1ted frame.
 	///
 	/// Optional, if not available, the most conservative estimation will be used.
 	bool (*last_render_time)(backend_t *backend_data, struct timespec *ts);
@@ -331,39 +320,35 @@ struct backend_operations {
 	 *
 	 * @param backend_data backend data
 	 * @param prop         the property to change
-	 * @param image        an image handle, cannot be NULL.
+	 * @param image_data   an image data structure returned by the backend
 	 * @param args         property value
-	 * @return             whether the operation is successful
+	 * @return whether the operation is successful
 	 */
 	bool (*set_image_property)(backend_t *backend_data, enum image_properties prop,
-	                           image_handle image, void *args) attr_nonnull(1, 3);
+	                           void *image_data, void *args);
 
 	/**
 	 * Manipulate an image. Image properties are untouched.
 	 *
 	 * @param backend_data backend data
 	 * @param op           the operation to perform
-	 * @param image        an image handle, cannot be NULL.
+	 * @param image_data   an image data structure returned by the backend
 	 * @param reg_op       the clip region, define the part of the image to be
 	 *                     operated on.
 	 * @param reg_visible  define the part of the image that will eventually
 	 *                     be visible on target. this is a hint to the backend
 	 *                     for optimization purposes.
 	 * @param args         extra arguments, operation specific
-	 * @return             whether the operation is successful
+	 * @return whether the operation is successful
 	 */
-	bool (*image_op)(backend_t *backend_data, enum image_operations op,
-	                 image_handle image, const region_t *reg_op,
-	                 const region_t *reg_visible, void *args) attr_nonnull(1, 3, 4, 5);
+	bool (*image_op)(backend_t *backend_data, enum image_operations op, void *image_data,
+	                 const region_t *reg_op, const region_t *reg_visible, void *args);
 
-	/// Create another instance of the `image`. The newly created image
-	/// inherits its content and all image properties from the image being
-	/// cloned. All `image_op` and `set_image_property` calls on the
-	/// returned image should not affect the original image.
-	///
-	/// @param image the image to be cloned, must not be NULL.
-	image_handle (*clone_image)(backend_t *base, image_handle image,
-	                            const region_t *reg_visible) attr_nonnull_all;
+	/// Create another instance of the `image_data`. All `image_op` and
+	/// `set_image_property` calls on the returned image should not affect the
+	/// original image
+	void *(*clone_image)(backend_t *base, const void *image_data,
+	                     const region_t *reg_visible);
 
 	/// Create a blur context that can be used to call `blur`
 	void *(*create_blur_context)(backend_t *base, enum blur_method, void *args);
@@ -390,8 +375,4 @@ struct backend_operations {
 
 extern struct backend_operations *backend_list[];
 
-/// paint all windows
-///
-/// Returns if any render command is issued. IOW if nothing on the screen has changed,
-/// this function will return false.
-bool paint_all_new(session_t *ps, struct managed_win *t) attr_nonnull(1);
+void paint_all_new(session_t *ps, struct managed_win *const t) attr_nonnull(1);

@@ -81,19 +81,17 @@ FILE *open_config_file(const char *cpath, char **ppath) {
 
 	// First search for config file in user config directory
 	auto config_home = xdg_config_home();
-	if (config_home) {
-		auto ret = open_config_file_at(config_home, ppath);
-		free((void *)config_home);
-		if (ret) {
-			return ret;
-		}
+	auto ret = open_config_file_at(config_home, ppath);
+	free((void *)config_home);
+	if (ret) {
+		return ret;
 	}
 
 	// Fall back to legacy config file in user home directory
 	const char *home = getenv("HOME");
 	if (home && strlen(home)) {
 		auto path = mstrjoin(home, config_filename_legacy);
-		auto ret = fopen(path, "r");
+		ret = fopen(path, "r");
 		if (ret && ppath) {
 			*ppath = path;
 		} else {
@@ -107,7 +105,7 @@ FILE *open_config_file(const char *cpath, char **ppath) {
 	// Fall back to config file in system config directory
 	auto config_dirs = xdg_config_dirs();
 	for (int i = 0; config_dirs[i]; i++) {
-		auto ret = open_config_file_at(config_dirs[i], ppath);
+		ret = open_config_file_at(config_dirs[i], ppath);
 		if (ret) {
 			free(config_dirs);
 			return ret;
@@ -487,8 +485,7 @@ char *parse_config_libconfig(options_t *opt, const char *config_file, bool *shad
 	}
 	// --sw-opti
 	if (lcfg_lookup_bool(&cfg, "sw-opti", &bval)) {
-		log_error("The sw-opti %s", deprecation_message);
-		goto err;
+		log_warn("The sw-opti %s", deprecation_message);
 	}
 	// --use-ewmh-active-win
 	lcfg_lookup_bool(&cfg, "use-ewmh-active-win", &opt->use_ewmh_active_win);

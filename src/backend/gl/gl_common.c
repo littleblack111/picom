@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // Copyright (c) Yuxuan Shui <yshuiv7@gmail.com>
-#include <epoxy/gl.h>
+#include <GL/gl.h>
+#include <GL/glext.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
@@ -184,7 +185,7 @@ void gl_destroy_window_shader(backend_t *backend_data attr_unused, void *shader)
  * @note In order to reduce number of textures which needs to be
  * allocated and deleted during this recursive render
  * we reuse the same two textures for render source and
- * destination simply by alternating between them.
+ * destination simply by alterating between them.
  * Unfortunately on first iteration source_texture might
  * be read-only. In this case we will select auxiliary_texture as
  * destination_texture in order not to touch that read-only source
@@ -252,7 +253,7 @@ _gl_average_texture_color(backend_t *base, GLuint source_texture, GLuint destina
 
 /*
  * @brief Builds a 1x1 texture which has color corresponding to the average of all
- * pixels of img by recursively rendering into texture of quarter the size (half
+ * pixels of img by recursively rendering into texture of quorter the size (half
  * width and half height).
  * Returned texture must not be deleted, since it's owned by the gl_image. It will be
  * deleted when the gl_image is released.
@@ -389,10 +390,6 @@ static void _gl_compose(backend_t *base, struct backend_image *img, GLuint targe
 	if (win_shader->uniform_tex >= 0) {
 		glUniform1i(win_shader->uniform_tex, 0);
 	}
-	if (win_shader->uniform_effective_size >= 0) {
-		glUniform2f(win_shader->uniform_effective_size, (float)img->ewidth,
-		            (float)img->eheight);
-	}
 	if (win_shader->uniform_dim >= 0) {
 		glUniform1f(win_shader->uniform_dim, (float)img->dim);
 	}
@@ -500,7 +497,7 @@ void x_rect_to_coords(int nrects, const rect_t *rects, coord_t image_dst,
                       int extent_height, int texture_height, int root_height,
                       bool y_inverted, GLint *coord, GLuint *indices) {
 	image_dst.y = root_height - image_dst.y;
-	image_dst.y -= extent_height;
+    image_dst.y -= extent_height;
 
 
 	for (int i = 0; i < nrects; i++) {
@@ -552,12 +549,11 @@ void x_rect_to_coords(int nrects, const rect_t *rects, coord_t image_dst,
 }
 
 // TODO(yshui) make use of reg_visible
-void gl_compose(backend_t *base, image_handle image_data, coord_t image_dst, image_handle mask_,
+void gl_compose(backend_t *base, void *image_data, coord_t image_dst, void *mask,
                 coord_t mask_dst, const region_t *reg_tgt,
                 const region_t *reg_visible attr_unused, bool lerp) {
 	auto gd = (struct gl_data *)base;
-	auto img = (struct backend_image *)image_data;
-	auto mask = (struct backend_image *)mask_;
+	struct backend_image *img = image_data;
 	auto inner = (struct gl_texture *)img->inner;
 
 	// Painting
@@ -612,7 +608,6 @@ static bool gl_win_shader_from_stringv(const char **vshader_strv,
 	bind_uniform(ret, opacity);
 	bind_uniform(ret, invert_color);
 	bind_uniform(ret, tex);
-	bind_uniform(ret, effective_size);
 	bind_uniform(ret, dim);
 	bind_uniform(ret, brightness);
 	bind_uniform(ret, max_brightness);
@@ -719,7 +714,7 @@ void gl_fill(backend_t *base, struct color c, const region_t *clip) {
 	return _gl_fill(base, c, clip, gd->back_fbo, gd->height, true);
 }
 
-image_handle gl_make_mask(backend_t *base, geometry_t size, const region_t *reg) {
+void *gl_make_mask(backend_t *base, geometry_t size, const region_t *reg) {
 	auto tex = ccalloc(1, struct gl_texture);
 	auto img = default_new_backend_image(size.width, size.height);
 	tex->width = size.width;
@@ -750,7 +745,7 @@ image_handle gl_make_mask(backend_t *base, geometry_t size, const region_t *reg)
 	glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
 	glDeleteFramebuffers(1, &fbo);
-	return (image_handle)img;
+	return img;
 }
 
 static void gl_release_image_inner(backend_t *base, struct gl_texture *inner) {
@@ -766,8 +761,8 @@ static void gl_release_image_inner(backend_t *base, struct gl_texture *inner) {
 	gl_check_err();
 }
 
-void gl_release_image(backend_t *base, image_handle image) {
-	auto wd = (struct backend_image *)image;
+void gl_release_image(backend_t *base, void *image_data) {
+	struct backend_image *wd = image_data;
 	auto inner = (struct gl_texture *)wd->inner;
 	inner->refcount--;
 	assert(inner->refcount >= 0);
@@ -894,35 +889,24 @@ bool gl_init(struct gl_data *gd, session_t *ps) {
 	glUseProgram(0);
 
 	gd->dithered_present = ps->o.dithered_present;
-	gd->dummy_prog =
-	    gl_create_program_from_strv((const char *[]){present_vertex_shader, NULL},
-	                                (const char *[]){dummy_frag, NULL});
-	if (!gd->dummy_prog) {
-		log_error("Failed to create the dummy shader");
-		return false;
-	}
 	if (gd->dithered_present) {
 		gd->present_prog = gl_create_program_from_strv(
 		    (const char *[]){present_vertex_shader, NULL},
 		    (const char *[]){present_frag, dither_glsl, NULL});
 	} else {
-		gd->present_prog = gd->dummy_prog;
+		gd->present_prog = gl_create_program_from_strv(
+		    (const char *[]){present_vertex_shader, NULL},
+		    (const char *[]){dummy_frag, NULL});
 	}
 	if (!gd->present_prog) {
 		log_error("Failed to create the present shader");
 		return false;
 	}
-
-	pml = glGetUniformLocationChecked(gd->dummy_prog, "projection");
-	glUseProgram(gd->dummy_prog);
-	glUniform1i(glGetUniformLocationChecked(gd->dummy_prog, "tex"), 0);
+	pml = glGetUniformLocationChecked(gd->present_prog, "projection");
+	glUseProgram(gd->present_prog);
+	glUniform1i(glGetUniformLocationChecked(gd->present_prog, "tex"), 0);
 	glUniformMatrix4fv(pml, 1, false, projection_matrix[0]);
-	if (gd->present_prog != gd->dummy_prog) {
-		pml = glGetUniformLocationChecked(gd->present_prog, "projection");
-		glUseProgram(gd->present_prog);
-		glUniform1i(glGetUniformLocationChecked(gd->present_prog, "tex"), 0);
-		glUniformMatrix4fv(pml, 1, false, projection_matrix[0]);
-	}
+	glUseProgram(0);
 
 	gd->shadow_shader.prog =
 	    gl_create_program_from_str(present_vertex_shader, shadow_colorization_frag);
@@ -932,6 +916,7 @@ bool gl_init(struct gl_data *gd, session_t *ps) {
 	glUseProgram(gd->shadow_shader.prog);
 	glUniform1i(glGetUniformLocationChecked(gd->shadow_shader.prog, "tex"), 0);
 	glUniformMatrix4fv(pml, 1, false, projection_matrix[0]);
+	glUseProgram(0);
 	glBindFragDataLocation(gd->shadow_shader.prog, 0, "out_color");
 
 	gd->brightness_shader.prog =
@@ -944,7 +929,6 @@ bool gl_init(struct gl_data *gd, session_t *ps) {
 	glUseProgram(gd->brightness_shader.prog);
 	glUniform1i(glGetUniformLocationChecked(gd->brightness_shader.prog, "tex"), 0);
 	glUniformMatrix4fv(pml, 1, false, projection_matrix[0]);
-
 	glUseProgram(0);
 
 	// Set up the size and format of the back texture
@@ -981,8 +965,8 @@ bool gl_init(struct gl_data *gd, session_t *ps) {
 	} else {
 		gd->is_nvidia = false;
 	}
-	gd->has_robustness = epoxy_has_gl_extension("GL_ARB_robustness");
-	gd->has_egl_image_storage = epoxy_has_gl_extension("GL_EXT_EGL_image_storage");
+	gd->has_robustness = gl_has_extension("GL_ARB_robustness");
+	gd->has_egl_image_storage = gl_has_extension("GL_EXT_EGL_image_storage");
 	gl_check_err();
 
 	return true;
@@ -998,24 +982,9 @@ void gl_deinit(struct gl_data *gd) {
 		gl_destroy_window_shader(&gd->base, gd->default_shader);
 		gd->default_shader = NULL;
 	}
-	glDeleteProgram(gd->dummy_prog);
-	if (gd->present_prog != gd->dummy_prog) {
-		glDeleteProgram(gd->present_prog);
-	}
-	gd->dummy_prog = 0;
-	gd->present_prog = 0;
-
-	glDeleteProgram(gd->fill_shader.prog);
-	glDeleteProgram(gd->brightness_shader.prog);
-	glDeleteProgram(gd->shadow_shader.prog);
-	gd->fill_shader.prog = 0;
-	gd->brightness_shader.prog = 0;
-	gd->shadow_shader.prog = 0;
 
 	glDeleteTextures(1, &gd->default_mask_texture);
 	glDeleteTextures(1, &gd->back_texture);
-
-	glDeleteQueries(2, gd->frame_timing);
 
 	gl_check_err();
 }
@@ -1048,11 +1017,9 @@ static inline void gl_image_decouple(backend_t *base, struct backend_image *img)
 	auto new_tex = ccalloc(1, struct gl_texture);
 
 	new_tex->texture = gl_new_texture(GL_TEXTURE_2D);
-	new_tex->y_inverted = inner->y_inverted;
-	new_tex->has_alpha = inner->has_alpha;
+	new_tex->y_inverted = true;
 	new_tex->height = inner->height;
 	new_tex->width = inner->width;
-	new_tex->shader = inner->shader;
 	new_tex->refcount = 1;
 	new_tex->user_data = gd->decouple_texture_user_data(base, inner->user_data);
 
@@ -1061,7 +1028,8 @@ static inline void gl_image_decouple(backend_t *base, struct backend_image *img)
 	             GL_BGRA, GL_UNSIGNED_BYTE, NULL);
 	glBindTexture(GL_TEXTURE_2D, 0);
 
-	glUseProgram(gd->dummy_prog);
+	assert(gd->present_prog);
+	glUseProgram(gd->present_prog);
 	glBindTexture(GL_TEXTURE_2D, inner->texture);
 
 	GLuint fbo;
@@ -1231,9 +1199,9 @@ bool gl_last_render_time(backend_t *base, struct timespec *ts) {
 	return true;
 }
 
-bool gl_image_op(backend_t *base, enum image_operations op, image_handle image,
+bool gl_image_op(backend_t *base, enum image_operations op, void *image_data,
                  const region_t *reg_op, const region_t *reg_visible attr_unused, void *arg) {
-	auto tex = (struct backend_image *)image;
+	struct backend_image *tex = image_data;
 	switch (op) {
 	case IMAGE_OP_APPLY_ALPHA:
 		gl_image_decouple(base, tex);
@@ -1246,12 +1214,12 @@ bool gl_image_op(backend_t *base, enum image_operations op, image_handle image,
 }
 
 bool gl_set_image_property(backend_t *backend_data, enum image_properties prop,
-                           image_handle image, void *args) {
+                           void *image_data, void *args) {
 	if (prop != IMAGE_PROPERTY_CUSTOM_SHADER) {
-		return default_set_image_property(backend_data, prop, image, args);
+		return default_set_image_property(backend_data, prop, image_data, args);
 	}
 
-	auto img = (struct backend_image *)image;
+	struct backend_image *img = image_data;
 	auto inner = (struct gl_texture *)img->inner;
 	inner->shader = args;
 	return true;
@@ -1290,12 +1258,12 @@ void gl_destroy_shadow_context(backend_t *base attr_unused, struct backend_shado
 	free(ctx_);
 }
 
-image_handle gl_shadow_from_mask(backend_t *base, image_handle mask_,
-                                 struct backend_shadow_context *sctx, struct color color) {
+void *gl_shadow_from_mask(backend_t *base, void *mask,
+                          struct backend_shadow_context *sctx, struct color color) {
 	log_debug("Create shadow from mask");
 	auto gd = (struct gl_data *)base;
-	auto mask = (struct backend_image *)mask_;
-	auto inner = (struct gl_texture *)mask->inner;
+	auto img = (struct backend_image *)mask;
+	auto inner = (struct gl_texture *)img->inner;
 	auto gsctx = (struct gl_shadow_context *)sctx;
 	int radius = (int)gsctx->radius;
 
@@ -1325,7 +1293,7 @@ image_handle gl_shadow_from_mask(backend_t *base, image_handle mask_,
 	glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
 	                       source_texture, 0);
 	glDrawBuffer(GL_COLOR_ATTACHMENT0);
-	if (mask->color_inverted) {
+	if (img->color_inverted) {
 		// If the mask is inverted, clear the source_texture to white, so the
 		// "outside" of the mask would be correct
 		glClearColor(1, 1, 1, 1);
@@ -1388,11 +1356,8 @@ image_handle gl_shadow_from_mask(backend_t *base, image_handle mask_,
 
 	glBindTexture(GL_TEXTURE_2D, tmp_texture);
 	glUseProgram(gd->shadow_shader.prog);
-	// The shadow color is converted to the premultiplied format to respect the
-	// globally set glBlendFunc and thus get the correct and expected result.
-	glUniform4f(gd->shadow_shader.uniform_color, (GLfloat)(color.red * color.alpha),
-	            (GLfloat)(color.green * color.alpha),
-	            (GLfloat)(color.blue * color.alpha), (GLfloat)color.alpha);
+	glUniform4f(gd->shadow_shader.uniform_color, (GLfloat)color.red,
+	            (GLfloat)color.green, (GLfloat)color.blue, (GLfloat)color.alpha);
 
 	// clang-format off
 	GLuint indices[] = {0, 1, 2, 2, 3, 0};
@@ -1434,7 +1399,7 @@ image_handle gl_shadow_from_mask(backend_t *base, image_handle mask_,
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
 	glDeleteFramebuffers(1, &fbo);
 	gl_check_err();
-	return (image_handle)new_img;
+	return new_img;
 }
 
 enum device_status gl_device_status(backend_t *base) {
